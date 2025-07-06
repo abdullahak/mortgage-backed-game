@@ -1,0 +1,1412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mortgage Backed Monopoly</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .header h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #7f8c8d;
+            font-style: italic;
+            font-size: 1.1em;
+        }
+
+        .nav-tabs {
+            display: flex;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .nav-tab {
+            flex: 1;
+            padding: 15px;
+            text-align: center;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 1.1em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .nav-tab:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .nav-tab.active {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .content {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            min-height: 600px;
+        }
+
+        .section {
+            display: none;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        .player-setup {
+            text-align: center;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            max-width: 400px;
+            padding: 12px;
+            border: 2px solid #ecf0f1;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: linear-gradient(45deg, #95a5a6, #7f8c8d);
+        }
+
+        .btn-danger {
+            background: linear-gradient(45deg, #e74c3c, #c0392b);
+        }
+
+        .btn-success {
+            background: linear-gradient(45deg, #2ecc71, #27ae60);
+        }
+
+        .player-card {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            border: 2px solid #dee2e6;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+        }
+
+        .player-card.current {
+            border-color: #667eea;
+            box-shadow: 0 0 20px rgba(102, 126, 234, 0.2);
+        }
+
+        .player-name {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .player-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .stat {
+            background: rgba(255, 255, 255, 0.7);
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #7f8c8d;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .modal-header {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #2c3e50;
+        }
+
+        .property-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .property-card {
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .property-card:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+        }
+
+        .property-card.selected {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .property-card.owned {
+            background: rgba(46, 204, 113, 0.1);
+            border-color: #2ecc71;
+        }
+
+        .transaction-form {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .transaction-side {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px solid #dee2e6;
+        }
+
+        .transaction-side h3 {
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+
+        .asset-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 10px;
+            background: white;
+        }
+
+        .asset-item {
+            padding: 10px;
+            border-bottom: 1px solid #ecf0f1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .asset-item:last-child {
+            border-bottom: none;
+        }
+
+        .game-log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+        }
+
+        .log-entry {
+            margin-bottom: 10px;
+            padding: 8px;
+            background: white;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .log-entry.turn-start {
+            background: rgba(102, 126, 234, 0.1);
+            border-left: 4px solid #667eea;
+        }
+
+        .log-entry.transaction {
+            background: rgba(46, 204, 113, 0.1);
+            border-left: 4px solid #2ecc71;
+        }
+
+        .log-entry.bankruptcy {
+            background: rgba(231, 76, 60, 0.1);
+            border-left: 4px solid #e74c3c;
+        }
+
+        @media (max-width: 768px) {
+            .nav-tabs {
+                flex-direction: column;
+            }
+
+            .transaction-form {
+                grid-template-columns: 1fr;
+            }
+
+            .player-stats {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .actions {
+                flex-direction: column;
+            }
+
+            .btn {
+                width: 100%;
+            }
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Mortgage Backed Monopoly</h1>
+            <p><em>If they did it in 2008, it's fair game</em></p>
+        </div>
+
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="showSection('setup')">Setup</button>
+            <button class="nav-tab" onclick="showSection('game')">Game</button>
+            <button class="nav-tab" onclick="showSection('market')">Market</button>
+            <button class="nav-tab" onclick="showSection('settings')">Settings</button>
+        </div>
+
+        <div class="content">
+            <!-- Setup Section -->
+            <div class="section active" id="setup">
+                <div class="player-setup">
+                    <h2>Game Setup</h2>
+                    <div class="form-group">
+                        <label>Game Mode:</label>
+                        <select id="gameMode">
+                            <option value="new">Start New Game</option>
+                            <option value="load">Load Existing Game</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Number of Players (2-8):</label>
+                        <input type="number" id="playerCount" min="2" max="8" value="4">
+                    </div>
+                    <div id="playerNames"></div>
+                    <button class="btn" onclick="setupGame()">Start Game</button>
+                </div>
+            </div>
+
+            <!-- Game Section -->
+            <div class="section" id="game">
+                <div id="gameContent">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Please set up the game first</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Market Section -->
+            <div class="section" id="market">
+                <h2>Secondary Market</h2>
+                <div class="transaction-form">
+                    <div class="transaction-side">
+                        <h3>Player 1 Offers</h3>
+                        <div class="form-group">
+                            <label>Player:</label>
+                            <select id="player1Select"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Cash:</label>
+                            <input type="number" id="player1Cash" min="0" value="0">
+                        </div>
+                        <div class="asset-list" id="player1Assets"></div>
+                    </div>
+                    <div class="transaction-side">
+                        <h3>Player 2 Offers</h3>
+                        <div class="form-group">
+                            <label>Player:</label>
+                            <select id="player2Select"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Cash:</label>
+                            <input type="number" id="player2Cash" min="0" value="0">
+                        </div>
+                        <div class="asset-list" id="player2Assets"></div>
+                    </div>
+                </div>
+                <div style="text-align: center;">
+                    <button class="btn btn-success" onclick="executeTransaction()">Execute Transaction</button>
+                </div>
+
+                <h3 style="margin-top: 30px;">Payment System</h3>
+                <div class="form-group">
+                    <label>From Player:</label>
+                    <select id="paymentFromPlayer"></select>
+                </div>
+                <div class="form-group">
+                    <label>To Player/LLC:</label>
+                    <select id="paymentToPlayer"></select>
+                </div>
+                <div class="form-group">
+                    <label>Amount:</label>
+                    <input type="number" id="paymentAmount" min="0" step="0.01">
+                </div>
+                <button class="btn btn-success" onclick="makePayment()">Make Payment</button>
+            </div>
+
+            <!-- Settings Section -->
+            <div class="section" id="settings">
+                <h2>Game Settings</h2>
+                <div class="form-group">
+                    <label>Interest Rate (%):</label>
+                    <input type="number" id="interestRate" min="0" max="100" step="0.1" value="5">
+                </div>
+                <div class="form-group">
+                    <label>Pass Go Amount:</label>
+                    <input type="number" id="passGoAmount" min="0" step="50" value="200">
+                </div>
+                <button class="btn" onclick="updateSettings()">Update Settings</button>
+                <button class="btn btn-danger" onclick="endGame()">End Game & Declare Winner</button>
+                <button class="btn btn-secondary" onclick="resetGame()">Reset Game</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal" id="buyPropertyModal">
+        <div class="modal-content">
+            <div class="modal-header">Buy Property</div>
+            <div class="property-grid" id="availableProperties"></div>
+            <div class="form-group">
+                <label>Purchase Price:</label>
+                <input type="number" id="purchasePrice" min="0" step="50">
+            </div>
+            <div style="text-align: center;">
+                <button class="btn btn-success" onclick="confirmPurchase()">Buy Property</button>
+                <button class="btn btn-secondary" onclick="closeModal('buyPropertyModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="ipoModal">
+        <div class="modal-content">
+            <div class="modal-header">Create IPO</div>
+            <div class="form-group">
+                <label>Ticker Symbol:</label>
+                <input type="text" id="ipoTicker" placeholder="e.g., PROP">
+            </div>
+            <div class="form-group">
+                <label>Number of Shares (1-12):</label>
+                <input type="number" id="ipoShares" min="1" max="12" value="1">
+            </div>
+            <div class="form-group">
+                <label>Price per Share:</label>
+                <input type="number" id="ipoPrice" min="0" step="0.01">
+            </div>
+            <div class="form-group">
+                <label>Select Assets to Include:</label>
+                <div class="asset-list" id="ipoAssets"></div>
+            </div>
+            <div style="text-align: center;">
+                <button class="btn btn-success" onclick="createIPO()">Create IPO</button>
+                <button class="btn btn-secondary" onclick="closeModal('ipoModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="debtModal">
+        <div class="modal-content">
+            <div class="modal-header">Debt Management</div>
+            <div class="form-group">
+                <label>Action:</label>
+                <select id="debtAction" onchange="toggleDebtForm()">
+                    <option value="issue">Issue New Debt</option>
+                    <option value="settle">Settle Existing Debt</option>
+                </select>
+            </div>
+            <div id="issueDebtForm">
+                <div class="form-group">
+                    <label>Loan Amount:</label>
+                    <input type="number" id="loanAmount" min="0" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Interest Rate (%):</label>
+                    <input type="number" id="loanRate" min="0" max="100" step="0.1" value="5">
+                </div>
+                <div class="form-group">
+                    <label>Collateral Assets:</label>
+                    <div class="asset-list" id="collateralAssets"></div>
+                </div>
+            </div>
+            <div id="settleDebtForm" style="display: none;">
+                <div class="form-group">
+                    <label>Select Debt to Settle:</label>
+                    <select id="debtToSettle"></select>
+                </div>
+                <div class="form-group">
+                    <label>Payment Amount:</label>
+                    <input type="number" id="settlementAmount" min="0" step="0.01">
+                </div>
+            </div>
+            <div style="text-align: center;">
+                <button class="btn btn-success" onclick="processDebt()">Process</button>
+                <button class="btn btn-secondary" onclick="closeModal('debtModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="corporationModal">
+        <div class="modal-content">
+            <div class="modal-header">Manage Corporations</div>
+            <div id="corporationList"></div>
+            <div style="text-align: center;">
+                <button class="btn btn-secondary" onclick="closeModal('corporationModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Game State
+        let gameState = {
+            players: [],
+            currentPlayerIndex: 0,
+            properties: [],
+            corporations: [],
+            gameLog: [],
+            settings: {
+                interestRate: 5,
+                passGoAmount: 200
+            },
+            selectedProperty: null,
+            selectedAssets: []
+        };
+
+        // Monopoly Properties Database
+        const MONOPOLY_PROPERTIES = [
+            { name: "Mediterranean Avenue", color: "Brown", price: 60, rent: [2, 10, 30, 90, 160, 250] },
+            { name: "Baltic Avenue", color: "Brown", price: 60, rent: [4, 20, 60, 180, 320, 450] },
+            { name: "Oriental Avenue", color: "Light Blue", price: 100, rent: [6, 30, 90, 270, 400, 550] },
+            { name: "Vermont Avenue", color: "Light Blue", price: 100, rent: [6, 30, 90, 270, 400, 550] },
+            { name: "Connecticut Avenue", color: "Light Blue", price: 120, rent: [8, 40, 100, 300, 450, 600] },
+            { name: "St. Charles Place", color: "Pink", price: 140, rent: [10, 50, 150, 450, 625, 750] },
+            { name: "Electric Company", color: "Utility", price: 150, rent: [4, 10] },
+            { name: "States Avenue", color: "Pink", price: 140, rent: [10, 50, 150, 450, 625, 750] },
+            { name: "Virginia Avenue", color: "Pink", price: 160, rent: [12, 60, 180, 500, 700, 900] },
+            { name: "Pennsylvania Railroad", color: "Railroad", price: 200, rent: [25, 50, 100, 200] },
+            { name: "St. James Place", color: "Orange", price: 180, rent: [14, 70, 200, 550, 750, 950] },
+            { name: "Tennessee Avenue", color: "Orange", price: 180, rent: [14, 70, 200, 550, 750, 950] },
+            { name: "New York Avenue", color: "Orange", price: 200, rent: [16, 80, 220, 600, 800, 1000] },
+            { name: "Kentucky Avenue", color: "Red", price: 220, rent: [18, 90, 250, 700, 875, 1050] },
+            { name: "Indiana Avenue", color: "Red", price: 220, rent: [18, 90, 250, 700, 875, 1050] },
+            { name: "Illinois Avenue", color: "Red", price: 240, rent: [20, 100, 300, 750, 925, 1100] },
+            { name: "B. & O. Railroad", color: "Railroad", price: 200, rent: [25, 50, 100, 200] },
+            { name: "Atlantic Avenue", color: "Yellow", price: 260, rent: [22, 110, 330, 800, 975, 1150] },
+            { name: "Ventnor Avenue", color: "Yellow", price: 260, rent: [22, 110, 330, 800, 975, 1150] },
+            { name: "Water Works", color: "Utility", price: 150, rent: [4, 10] },
+            { name: "Marvin Gardens", color: "Yellow", price: 280, rent: [24, 120, 360, 850, 1025, 1200] },
+            { name: "Pacific Avenue", color: "Green", price: 300, rent: [26, 130, 390, 900, 1100, 1275] },
+            { name: "North Carolina Avenue", color: "Green", price: 300, rent: [26, 130, 390, 900, 1100, 1275] },
+            { name: "Pennsylvania Avenue", color: "Green", price: 320, rent: [28, 150, 450, 1000, 1200, 1400] },
+            { name: "Short Line", color: "Railroad", price: 200, rent: [25, 50, 100, 200] },
+            { name: "Park Place", color: "Dark Blue", price: 350, rent: [35, 175, 500, 1100, 1300, 1500] },
+            { name: "Boardwalk", color: "Dark Blue", price: 400, rent: [50, 200, 600, 1400, 1700, 2000] }
+        ];
+
+        // Initialize game
+        function initializeGame() {
+            gameState.properties = MONOPOLY_PROPERTIES.map(prop => ({
+                ...prop,
+                owner: null,
+                houses: 0,
+                available: true
+            }));
+        }
+
+        // Show section
+        function showSection(sectionName) {
+            document.querySelectorAll('.section').forEach(section => {
+                section.classList.remove('active');
+            });
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            document.getElementById(sectionName).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        // Setup game
+        function setupGame() {
+            const playerCount = parseInt(document.getElementById('playerCount').value);
+            const playerNames = [];
+            
+            for (let i = 0; i < playerCount; i++) {
+                const nameInput = document.querySelector(`#playerName${i}`);
+                if (nameInput && nameInput.value.trim()) {
+                    playerNames.push(nameInput.value.trim());
+                }
+            }
+            
+            if (playerNames.length !== playerCount) {
+                alert('Please enter all player names');
+                return;
+            }
+            
+            // Check for duplicate names
+            if (new Set(playerNames).size !== playerNames.length) {
+                alert('Player names must be unique');
+                return;
+            }
+            
+            // Initialize players
+            gameState.players = playerNames.map(name => ({
+                name,
+                cash: 1500,
+                properties: [],
+                equities: [],
+                debts: [],
+                interestOwed: 0,
+                netWorth: 1500,
+                bankrupt: false
+            }));
+            
+            initializeGame();
+            renderGame();
+            showSection('game');
+            
+            logAction(`Game started with ${playerCount} players: ${playerNames.join(', ')}`);
+        }
+
+        // Dynamic player name inputs
+        document.getElementById('playerCount').addEventListener('change', function() {
+            const count = parseInt(this.value);
+            const container = document.getElementById('playerNames');
+            container.innerHTML = '';
+            
+            for (let i = 0; i < count; i++) {
+                const div = document.createElement('div');
+                div.className = 'form-group';
+                div.innerHTML = `
+                    <label>Player ${i + 1} Name:</label>
+                    <input type="text" id="playerName${i}" placeholder="Enter player name">
+                `;
+                container.appendChild(div);
+            }
+        });
+
+        // Initialize player inputs
+        document.getElementById('playerCount').dispatchEvent(new Event('change'));
+
+        // Render game
+        function renderGame() {
+            const gameContent = document.getElementById('gameContent');
+            
+            if (gameState.players.length === 0) {
+                gameContent.innerHTML = `
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Please set up the game first</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+            
+            gameContent.innerHTML = `
+                <div class="player-card current">
+                    <div class="player-name">Current Player: ${currentPlayer.name}</div>
+                    <div class="player-stats">
+                        <div class="stat">
+                            <div class="stat-label">Cash</div>
+                            <div class="stat-value">$${currentPlayer.cash.toLocaleString()}</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-label">Properties</div>
+                            <div class="stat-value">${currentPlayer.properties.length}</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-label">Equities</div>
+                            <div class="stat-value">${currentPlayer.equities.length}</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-label">Debts</div>
+                            <div class="stat-value">${currentPlayer.debts.length}</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-label">Interest Owed</div>
+                            <div class="stat-value">$${currentPlayer.interestOwed.toLocaleString()}</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-label">Net Worth</div>
+                            <div class="stat-value">$${calculateNetWorth(currentPlayer).toLocaleString()}</div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <button class="btn" onclick="openModal('buyPropertyModal')">Buy Property</button>
+                        <button class="btn" onclick="openModal('ipoModal')">IPO</button>
+                        <button class="btn" onclick="openModal('debtModal')">Issue & Settle Debt</button>
+                        <button class="btn" onclick="openModal('corporationModal')">Manage Corporations</button>
+                        <button class="btn" onclick="collectCash()">Collect Cash</button>
+                        <button class="btn" onclick="payBank()">Pay Bank</button>
+                        <button class="btn btn-success" onclick="endTurn()" ${currentPlayer.interestOwed > 0 && currentPlayer.cash < currentPlayer.interestOwed ? 'disabled' : ''}>End Turn</button>
+                        <button class="btn btn-danger" onclick="declareBankruptcy()">Declare Bankruptcy</button>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <h3>All Players</h3>
+                    ${gameState.players.map((player, index) => `
+                        <div class="player-card ${index === gameState.currentPlayerIndex ? 'current' : ''} ${player.bankrupt ? 'bankrupt' : ''}">
+                            <div class="player-name">${player.name} ${player.bankrupt ? '(BANKRUPT)' : ''}</div>
+                            <div class="player-stats">
+                                <div class="stat">
+                                    <div class="stat-label">Cash</div>
+                                    <div class="stat-value">${player.cash.toLocaleString()}</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-label">Properties</div>
+                                    <div class="stat-value">${player.properties.length}</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-label">Equities</div>
+                                    <div class="stat-value">${player.equities.length}</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-label">Net Worth</div>
+                                    <div class="stat-value">${calculateNetWorth(player).toLocaleString()}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <h3>Game Log</h3>
+                    <div class="game-log">
+                        ${gameState.gameLog.slice(-20).reverse().map(log => `
+                            <div class="log-entry ${log.type}">${log.message}</div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            
+            updateMarketSelects();
+        }
+
+        // Calculate net worth
+        function calculateNetWorth(player) {
+            let netWorth = player.cash;
+            
+            // Add property values
+            player.properties.forEach(prop => {
+                netWorth += prop.price;
+            });
+            
+            // Add equity values (simplified - using book value)
+            player.equities.forEach(equity => {
+                netWorth += equity.value;
+            });
+            
+            // Subtract debt
+            player.debts.forEach(debt => {
+                netWorth -= debt.amount;
+            });
+            
+            return netWorth;
+        }
+
+        // Open modal
+        function openModal(modalId) {
+            document.getElementById(modalId).classList.add('active');
+            
+            if (modalId === 'buyPropertyModal') {
+                renderAvailableProperties();
+            } else if (modalId === 'ipoModal') {
+                renderIPOAssets();
+            } else if (modalId === 'debtModal') {
+                renderDebtAssets();
+            } else if (modalId === 'corporationModal') {
+                renderCorporations();
+            }
+        }
+
+        // Close modal
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+            gameState.selectedProperty = null;
+            gameState.selectedAssets = [];
+        }
+
+        // Render available properties
+        function renderAvailableProperties() {
+            const container = document.getElementById('availableProperties');
+            const availableProps = gameState.properties.filter(prop => prop.available);
+            
+            container.innerHTML = availableProps.map(prop => `
+                <div class="property-card ${gameState.selectedProperty?.name === prop.name ? 'selected' : ''}" 
+                     onclick="selectProperty('${prop.name}')">
+                    <div style="font-weight: bold; color: ${getColorCode(prop.color)};">${prop.name}</div>
+                    <div>Price: ${prop.price}</div>
+                    <div>${prop.color} Group</div>
+                </div>
+            `).join('');
+        }
+
+        // Get color code for property groups
+        function getColorCode(color) {
+            const colors = {
+                'Brown': '#8B4513',
+                'Light Blue': '#87CEEB',
+                'Pink': '#FFC0CB',
+                'Orange': '#FFA500',
+                'Red': '#FF0000',
+                'Yellow': '#FFFF00',
+                'Green': '#008000',
+                'Dark Blue': '#00008B',
+                'Railroad': '#000000',
+                'Utility': '#808080'
+            };
+            return colors[color] || '#000000';
+        }
+
+        // Select property
+        function selectProperty(propertyName) {
+            const property = gameState.properties.find(prop => prop.name === propertyName);
+            gameState.selectedProperty = property;
+            document.getElementById('purchasePrice').value = property.price;
+            renderAvailableProperties();
+        }
+
+        // Confirm purchase
+        function confirmPurchase() {
+            if (!gameState.selectedProperty) {
+                alert('Please select a property');
+                return;
+            }
+            
+            const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+            const price = parseFloat(document.getElementById('purchasePrice').value);
+            
+            if (price <= 0) {
+                alert('Please enter a valid price');
+                return;
+            }
+            
+            if (currentPlayer.cash < price) {
+                alert('Insufficient funds');
+                return;
+            }
+            
+            // Transfer property
+            currentPlayer.cash -= price;
+            currentPlayer.properties.push({...gameState.selectedProperty, purchasePrice: price});
+            gameState.selectedProperty.available = false;
+            gameState.selectedProperty.owner = currentPlayer.name;
+            
+            logAction(`${currentPlayer.name} purchased ${gameState.selectedProperty.name} for ${price.toLocaleString()}`, 'transaction');
+            
+            closeModal('buyPropertyModal');
+            renderGame();
+        }
+
+        // Render IPO assets
+        function renderIPOAssets() {
+            const container = document.getElementById('ipoAssets');
+            const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+            
+            container.innerHTML = currentPlayer.properties.map(prop => `
+                <div class="asset-item">
+                    <span>${prop.name}</span>
+                    <input type="checkbox" onchange="toggleAssetSelection('property', '${prop.name}')">
+                </div>
+            `).join('');
+        }
+
+        // Toggle asset selection
+        function toggleAssetSelection(type, id) {
+            const assetKey = `${type}:${id}`;
+            const index = gameState.selectedAssets.indexOf(assetKey);
+            
+            if (index > -1) {
+                gameState.selectedAssets.splice(index, 1);
+            } else {
+                gameState.selectedAssets.push(assetKey);
+            }
+        }
+
+        // Create IPO
+        function createIPO() {
+            const ticker = document.getElementById('ipoTicker').value.trim().toUpperCase();
+            const shares = parseInt(document.getElementById('ipoShares').value);
+            const pricePerShare = parseFloat(document.getElementById('ipoPrice').value);
+            
+            if (!ticker || shares <= 0 || shares > 12 || pricePerShare <= 0 || gameState.selectedAssets.length === 0) {
+                alert('Please fill in all fields and select at least one asset');
+                return;
+            }
+            
+            const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+            
+            // Create corporation
+            const corporation = {
+                ticker,
+                shares,
+                pricePerShare,
+                assets: [...gameState.selectedAssets],
+                chairman: currentPlayer.name,
+                shareholders: { [currentPlayer.name]: shares },
+                cashBalance: 0,
+                totalShares: shares
+            };
+            
+            gameState.corporations.push(corporation);
+            
+            // Add equity to player
+            currentPlayer.equities.push({
+                ticker,
+                shares,
+                value: shares * pricePerShare
+            });
+            
+            logAction(`${currentPlayer.name} created IPO ${ticker} with ${shares} shares at ${pricePerShare} each`, 'transaction');
+            
+            closeModal('ipoModal');
+            renderGame();
+        }
+
+        // Render debt assets
+        function renderDebtAssets() {
+            const container = document.getElementById('collateralAssets');
+            const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+            
+            container.innerHTML = currentPlayer.properties.map(prop => `
+                <div class="asset-item">
+                    <span>${prop.name} (${prop.price})</span>
+                    <input type="checkbox" onchange="toggleAssetSelection('debt-collateral', '${prop.name}')">
+                </div>
+            `).join('');
+            
+            // Update debt to settle dropdown
+            const settleSelect = document.getElementById('debtToSettle');
+            settleSelect.innerHTML = currentPlayer.debts.map((debt, index) => `
+                <option value="${index}">Debt #${index + 1}: ${debt.amount} at ${debt.rate}%</option>
+            `).join('');
+        }
+
+        // Toggle debt form
+        function toggleDebtForm() {
+            const action = document.getElementById('debtAction').value;
+            const issueForm = document.getElementById('issueDebtForm');
+            const settleForm = document.getElementById('settleDebtForm');
+            
+            if (action === 'issue') {
+                issueForm.style.display = 'block';
+                settleForm.style.display = 'none';
+            } else {
+                issueForm.style.display = 'none';
+                settleForm.style.display = 'block';
+            }
+        }
+
+        // Process debt
+        function processDebt() {
+            const action = document.getElementById('debtAction').value;
+            const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+            
+            if (action === 'issue') {
+                const amount = parseFloat(document.getElementById('loanAmount').value);
+                const rate = parseFloat(document.getElementById('loanRate').value);
+                
+                if (amount <= 0 || rate < 0) {
+                    alert('Please enter valid loan details');
+                    return;
+                }
+                
+                const debt = {
+                    amount,
+                    rate,
+                    collateral: [...gameState.selectedAssets],
+                    interestPerTurn: (amount * rate) / 100
+                };
+                
+                currentPlayer.cash += amount;
+                currentPlayer.debts.push(debt);
+                currentPlayer.interestOwed += debt.interestPerTurn;
+                
+                logAction(`${currentPlayer.name} issued debt of ${amount.toLocaleString()} at ${rate}%`, 'transaction');
+            } else {
+                const debtIndex = parseInt(document.getElementById('debtToSettle').value);
+                const paymentAmount = parseFloat(document.getElementById('settlementAmount').value);
+                
+                if (isNaN(debtIndex) || paymentAmount <= 0) {
+                    alert('Please select debt and enter payment amount');
+                    return;
+                }
+                
+                const debt = currentPlayer.debts[debtIndex];
+                if (currentPlayer.cash < paymentAmount) {
+                    alert('Insufficient funds');
+                    return;
+                }
+                
+                currentPlayer.cash -= paymentAmount;
+                debt.amount -= paymentAmount;
+                
+                if (debt.amount <= 0) {
+                    currentPlayer.interestOwed -= debt.interestPerTurn;
+                    currentPlayer.debts.splice(debtIndex, 1);
+                    logAction(`${currentPlayer.name} paid off debt completely`, 'transaction');
+                } else {
+                    debt.interestPerTurn = (debt.amount * debt.rate) / 100;
+                    currentPlayer.interestOwed = currentPlayer.debts.reduce((total, d) => total + d.interestPerTurn, 0);
+                    logAction(`${currentPlayer.name} paid down debt by ${paymentAmount.toLocaleString()}`, 'transaction');
+                }
+            }
+            
+            closeModal('debtModal');
+            renderGame();
+        }
+
+        // Render corporations
+        function renderCorporations() {
+            const container = document.getElementById('corporationList');
+            const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+            
+            const playerCorporations = gameState.corporations.filter(corp => 
+                corp.chairman === currentPlayer.name || corp.shareholders[currentPlayer.name] > 0
+            );
+            
+            container.innerHTML = playerCorporations.map(corp => `
+                <div class="corporation-card" style="background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px;">
+                    <h4>${corp.ticker}</h4>
+                    <p>Chairman: ${corp.chairman}</p>
+                    <p>Cash Balance: ${corp.cashBalance.toLocaleString()}</p>
+                    <p>Your Shares: ${corp.shareholders[currentPlayer.name] || 0} of ${corp.totalShares}</p>
+                    ${corp.chairman === currentPlayer.name ? `
+                        <div style="margin-top: 10px;">
+                            <button class="btn" onclick="distributeDividends('${corp.ticker}')">Distribute Dividends</button>
+                            <button class="btn" onclick="payBankFromCorp('${corp.ticker}')">Pay Bank</button>
+                            <button class="btn" onclick="transferChairman('${corp.ticker}')">Transfer Chairman</button>
+                        </div>
+                    ` : ''}
+                </div>
+            `).join('');
+        }
+
+        // Collect cash
+        function collectCash() {
+            const amount = prompt('Enter amount to collect:');
+            if (amount && !isNaN(amount) && parseFloat(amount) > 0) {
+                const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+                currentPlayer.cash += parseFloat(amount);
+                logAction(`${currentPlayer.name} collected ${parseFloat(amount).toLocaleString()}`, 'transaction');
+                renderGame();
+            }
+        }
+
+        // Pay bank
+        function payBank() {
+            const amount = prompt('Enter amount to pay:');
+            if (amount && !isNaN(amount) && parseFloat(amount) > 0) {
+                const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+                if (currentPlayer.cash >= parseFloat(amount)) {
+                    currentPlayer.cash -= parseFloat(amount);
+                    logAction(`${currentPlayer.name} paid bank ${parseFloat(amount).toLocaleString()}`, 'transaction');
+                    renderGame();
+                } else {
+                    alert('Insufficient funds');
+                }
+            }
+        }
+
+        // End turn
+        function endTurn() {
+            const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+            
+            // Deduct interest
+            if (currentPlayer.interestOwed > 0) {
+                if (currentPlayer.cash >= currentPlayer.interestOwed) {
+                    currentPlayer.cash -= currentPlayer.interestOwed;
+                    logAction(`${currentPlayer.name} paid interest of ${currentPlayer.interestOwed.toLocaleString()}`, 'transaction');
+                } else {
+                    alert('Cannot end turn - insufficient funds to pay interest');
+                    return;
+                }
+            }
+            
+            // Move to next player
+            do {
+                gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
+            } while (gameState.players[gameState.currentPlayerIndex].bankrupt);
+            
+            const nextPlayer = gameState.players[gameState.currentPlayerIndex];
+            logAction(`${nextPlayer.name}'s turn begins`, 'turn-start');
+            
+            renderGame();
+        }
+
+        // Declare bankruptcy
+        function declareBankruptcy() {
+            if (confirm('Are you sure you want to declare bankruptcy? This action cannot be undone.')) {
+                const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+                currentPlayer.bankrupt = true;
+                
+                // Return assets to market
+                currentPlayer.properties.forEach(prop => {
+                    const originalProp = gameState.properties.find(p => p.name === prop.name);
+                    if (originalProp) {
+                        originalProp.available = true;
+                        originalProp.owner = null;
+                    }
+                });
+                
+                logAction(`${currentPlayer.name} declared bankruptcy`, 'bankruptcy');
+                
+                // Check if game should end
+                const activePlayers = gameState.players.filter(p => !p.bankrupt);
+                if (activePlayers.length <= 1) {
+                    alert(`Game Over! ${activePlayers[0]?.name || 'No one'} wins!`);
+                    return;
+                }
+                
+                endTurn();
+            }
+        }
+
+        // Update market selects
+        function updateMarketSelects() {
+            const playerSelects = ['player1Select', 'player2Select', 'paymentFromPlayer', 'paymentToPlayer'];
+            
+            playerSelects.forEach(selectId => {
+                const select = document.getElementById(selectId);
+                if (select) {
+                    select.innerHTML = gameState.players.filter(p => !p.bankrupt).map(player => 
+                        `<option value="${player.name}">${player.name}</option>`
+                    ).join('');
+                    
+                    // Add corporations to payment selects
+                    if (selectId === 'paymentToPlayer') {
+                        select.innerHTML += gameState.corporations.map(corp => 
+                            `<option value="corp:${corp.ticker}">${corp.ticker} (LLC)</option>`
+                        ).join('');
+                    }
+                }
+            });
+        }
+
+        // Execute transaction
+        function executeTransaction() {
+            const player1Name = document.getElementById('player1Select').value;
+            const player2Name = document.getElementById('player2Select').value;
+            const player1Cash = parseFloat(document.getElementById('player1Cash').value) || 0;
+            const player2Cash = parseFloat(document.getElementById('player2Cash').value) || 0;
+            
+            if (player1Name === player2Name) {
+                alert('Cannot trade with yourself');
+                return;
+            }
+            
+            const player1 = gameState.players.find(p => p.name === player1Name);
+            const player2 = gameState.players.find(p => p.name === player2Name);
+            
+            if (player1Cash > player1.cash || player2Cash > player2.cash) {
+                alert('Insufficient funds for transaction');
+                return;
+            }
+            
+            // Execute cash exchange
+            player1.cash -= player1Cash;
+            player1.cash += player2Cash;
+            player2.cash -= player2Cash;
+            player2.cash += player1Cash;
+            
+            logAction(`Market transaction: ${player1Name} ↔ ${player2Name} - ${player1Cash} ↔ ${player2Cash}`, 'transaction');
+            
+            // Reset form
+            document.getElementById('player1Cash').value = 0;
+            document.getElementById('player2Cash').value = 0;
+            
+            renderGame();
+        }
+
+        // Make payment
+        function makePayment() {
+            const fromPlayer = document.getElementById('paymentFromPlayer').value;
+            const toPlayer = document.getElementById('paymentToPlayer').value;
+            const amount = parseFloat(document.getElementById('paymentAmount').value);
+            
+            if (!fromPlayer || !toPlayer || amount <= 0) {
+                alert('Please fill in all payment fields');
+                return;
+            }
+            
+            const payer = gameState.players.find(p => p.name === fromPlayer);
+            
+            if (payer.cash < amount) {
+                alert('Insufficient funds');
+                return;
+            }
+            
+            payer.cash -= amount;
+            
+            if (toPlayer.startsWith('corp:')) {
+                const ticker = toPlayer.replace('corp:', '');
+                const corp = gameState.corporations.find(c => c.ticker === ticker);
+                if (corp) {
+                    corp.cashBalance += amount;
+                    logAction(`${fromPlayer} paid ${amount.toLocaleString()} to ${ticker}`, 'transaction');
+                }
+            } else {
+                const recipient = gameState.players.find(p => p.name === toPlayer);
+                recipient.cash += amount;
+                logAction(`${fromPlayer} paid ${amount.toLocaleString()} to ${toPlayer}`, 'transaction');
+            }
+            
+            document.getElementById('paymentAmount').value = '';
+            renderGame();
+        }
+
+        // Update settings
+        function updateSettings() {
+            gameState.settings.interestRate = parseFloat(document.getElementById('interestRate').value);
+            gameState.settings.passGoAmount = parseFloat(document.getElementById('passGoAmount').value);
+            logAction(`Settings updated - Interest: ${gameState.settings.interestRate}%, Pass Go: ${gameState.settings.passGoAmount}`);
+        }
+
+        // End game
+        function endGame() {
+            const players = gameState.players.filter(p => !p.bankrupt);
+            let winner = null;
+            let maxNetWorth = 0;
+            
+            players.forEach(player => {
+                const netWorth = calculateNetWorth(player);
+                if (netWorth > maxNetWorth) {
+                    maxNetWorth = netWorth;
+                    winner = player;
+                }
+            });
+            
+            if (winner) {
+                alert(`Game ended! Winner: ${winner.name} with net worth of ${maxNetWorth.toLocaleString()}`);
+                logAction(`Game ended - Winner: ${winner.name} (${maxNetWorth.toLocaleString()})`, 'game-end');
+            }
+        }
+
+        // Reset game
+        function resetGame() {
+            if (confirm('Are you sure you want to reset the game? All progress will be lost.')) {
+                gameState = {
+                    players: [],
+                    currentPlayerIndex: 0,
+                    properties: [],
+                    corporations: [],
+                    gameLog: [],
+                    settings: {
+                        interestRate: 5,
+                        passGoAmount: 200
+                    },
+                    selectedProperty: null,
+                    selectedAssets: []
+                };
+                showSection('setup');
+            }
+        }
+
+        // Log action
+        function logAction(message, type = 'general') {
+            gameState.gameLog.push({
+                message,
+                type,
+                timestamp: new Date().toLocaleTimeString()
+            });
+        }
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize settings
+            document.getElementById('interestRate').value = gameState.settings.interestRate;
+            document.getElementById('passGoAmount').value = gameState.settings.passGoAmount;
+        });
+
+        // Placeholder functions for advanced features
+        function distributeDividends(ticker) {
+            const amount = prompt(`Enter dividend amount to distribute for ${ticker}:`);
+            if (amount && !isNaN(amount) && parseFloat(amount) > 0) {
+                const corp = gameState.corporations.find(c => c.ticker === ticker);
+                if (corp && corp.cashBalance >= parseFloat(amount)) {
+                    corp.cashBalance -= parseFloat(amount);
+                    logAction(`${ticker} distributed ${parseFloat(amount).toLocaleString()} in dividends`, 'transaction');
+                    renderGame();
+                } else {
+                    alert('Insufficient corporate funds');
+                }
+            }
+        }
+
+        function payBankFromCorp(ticker) {
+            const amount = prompt(`Enter amount for ${ticker} to pay bank:`);
+            if (amount && !isNaN(amount) && parseFloat(amount) > 0) {
+                const corp = gameState.corporations.find(c => c.ticker === ticker);
+                if (corp && corp.cashBalance >= parseFloat(amount)) {
+                    corp.cashBalance -= parseFloat(amount);
+                    logAction(`${ticker} paid bank ${parseFloat(amount).toLocaleString()}`, 'transaction');
+                    renderGame();
+                } else {
+                    alert('Insufficient corporate funds');
+                }
+            }
+        }
+
+        function transferChairman(ticker) {
+            const corp = gameState.corporations.find(c => c.ticker === ticker);
+            const shareholders = Object.keys(corp.shareholders).filter(name => corp.shareholders[name] > 0);
+            
+            const newChairman = prompt(`Transfer chairman of ${ticker} to:\n${shareholders.map((name, i) => `${i + 1}. ${name}`).join('\n')}\n\nEnter player name:`);
+            
+            if (newChairman && shareholders.includes(newChairman)) {
+                corp.chairman = newChairman;
+                logAction(`${ticker} chairman transferred to ${newChairman}`, 'transaction');
+                renderGame();
+            }
+        }
+    </script>
+</body>
+</html>
