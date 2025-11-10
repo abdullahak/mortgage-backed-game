@@ -404,10 +404,10 @@
         </div>
 
         <div class="nav-tabs">
-            <button class="nav-tab active" onclick="showSection('setup')">Setup</button>
-            <button class="nav-tab" onclick="showSection('game')">Game</button>
-            <button class="nav-tab" onclick="showSection('market')">Market</button>
-            <button class="nav-tab" onclick="showSection('settings')">Settings</button>
+            <button class="nav-tab active" onclick="showSection('setup', this)">Setup</button>
+            <button class="nav-tab" onclick="showSection('game', this)">Game</button>
+            <button class="nav-tab" onclick="showSection('market', this)">Market</button>
+            <button class="nav-tab" onclick="showSection('settings', this)">Settings</button>
         </div>
 
         <div class="content">
@@ -614,7 +614,11 @@
                 passGoAmount: 200
             },
             selectedProperty: null,
-            selectedAssets: []
+            selectedAssets: [],
+            marketTransaction: {
+                player1SelectedAssets: [],
+                player2SelectedAssets: []
+            }
         };
 
         // Monopoly Properties Database
@@ -659,35 +663,44 @@
         }
 
         // Show section
-        function showSection(sectionName) {
+        function showSection(sectionName, eventTarget) {
             document.querySelectorAll('.section').forEach(section => {
                 section.classList.remove('active');
             });
             document.querySelectorAll('.nav-tab').forEach(tab => {
                 tab.classList.remove('active');
             });
-            
+
             document.getElementById(sectionName).classList.add('active');
-            event.target.classList.add('active');
+            if (eventTarget) {
+                eventTarget.classList.add('active');
+            }
         }
 
         // Setup game
         function setupGame() {
             const playerCount = parseInt(document.getElementById('playerCount').value);
+
+            // Validate player count
+            if (isNaN(playerCount) || playerCount < 2 || playerCount > 8) {
+                alert('Player count must be between 2 and 8');
+                return;
+            }
+
             const playerNames = [];
-            
+
             for (let i = 0; i < playerCount; i++) {
                 const nameInput = document.querySelector(`#playerName${i}`);
                 if (nameInput && nameInput.value.trim()) {
                     playerNames.push(nameInput.value.trim());
                 }
             }
-            
+
             if (playerNames.length !== playerCount) {
                 alert('Please enter all player names');
                 return;
             }
-            
+
             // Check for duplicate names
             if (new Set(playerNames).size !== playerNames.length) {
                 alert('Player names must be unique');
@@ -698,7 +711,7 @@
             gameState.players = playerNames.map(name => ({
                 name,
                 cash: 1500,
-                properties: [],
+                propertyNames: [], // Store only property names, not full objects
                 equities: [],
                 debts: [],
                 interestOwed: 0,
@@ -708,8 +721,13 @@
             
             initializeGame();
             renderGame();
-            showSection('game');
-            
+
+            // Switch to game tab
+            document.querySelectorAll('.section').forEach(section => section.classList.remove('active'));
+            document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
+            document.getElementById('game').classList.add('active');
+            document.querySelectorAll('.nav-tab')[1].classList.add('active');
+
             logAction(`Game started with ${playerCount} players: ${playerNames.join(', ')}`);
         }
 
@@ -759,7 +777,7 @@
                         </div>
                         <div class="stat">
                             <div class="stat-label">Properties</div>
-                            <div class="stat-value">${currentPlayer.properties.length}</div>
+                            <div class="stat-value">${currentPlayer.propertyNames.length}</div>
                         </div>
                         <div class="stat">
                             <div class="stat-label">Equities</div>
@@ -783,6 +801,8 @@
                         <button class="btn" onclick="openModal('ipoModal')">IPO</button>
                         <button class="btn" onclick="openModal('debtModal')">Issue & Settle Debt</button>
                         <button class="btn" onclick="openModal('corporationModal')">Manage Corporations</button>
+                        <button class="btn" onclick="collectRent()">Collect Rent</button>
+                        <button class="btn" onclick="passGo()">Pass Go (Collect $${gameState.settings.passGoAmount})</button>
                         <button class="btn" onclick="collectCash()">Collect Cash</button>
                         <button class="btn" onclick="payBank()">Pay Bank</button>
                         <button class="btn btn-success" onclick="endTurn()" ${currentPlayer.interestOwed > 0 && currentPlayer.cash < currentPlayer.interestOwed ? 'disabled' : ''}>End Turn</button>
@@ -802,7 +822,7 @@
                                 </div>
                                 <div class="stat">
                                     <div class="stat-label">Properties</div>
-                                    <div class="stat-value">${player.properties.length}</div>
+                                    <div class="stat-value">${player.propertyNames.length}</div>
                                 </div>
                                 <div class="stat">
                                     <div class="stat-label">Equities</div>
@@ -830,25 +850,33 @@
             updateMarketSelects();
         }
 
+        // Helper function to get player's property objects
+        function getPlayerProperties(player) {
+            return player.propertyNames.map(name =>
+                gameState.properties.find(prop => prop.name === name)
+            ).filter(prop => prop !== undefined);
+        }
+
         // Calculate net worth
         function calculateNetWorth(player) {
             let netWorth = player.cash;
-            
+
             // Add property values
-            player.properties.forEach(prop => {
+            const playerProperties = getPlayerProperties(player);
+            playerProperties.forEach(prop => {
                 netWorth += prop.price;
             });
-            
+
             // Add equity values (simplified - using book value)
             player.equities.forEach(equity => {
                 netWorth += equity.value;
             });
-            
+
             // Subtract debt
             player.debts.forEach(debt => {
                 netWorth -= debt.amount;
             });
-            
+
             return netWorth;
         }
 
@@ -936,9 +964,10 @@
             
             // Transfer property
             currentPlayer.cash -= price;
-            currentPlayer.properties.push({...gameState.selectedProperty, purchasePrice: price});
+            currentPlayer.propertyNames.push(gameState.selectedProperty.name);
             gameState.selectedProperty.available = false;
             gameState.selectedProperty.owner = currentPlayer.name;
+            gameState.selectedProperty.purchasePrice = price;
             
             logAction(`${currentPlayer.name} purchased ${gameState.selectedProperty.name} for ${price.toLocaleString()}`, 'transaction');
             
@@ -950,8 +979,9 @@
         function renderIPOAssets() {
             const container = document.getElementById('ipoAssets');
             const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-            
-            container.innerHTML = currentPlayer.properties.map(prop => `
+            const playerProperties = getPlayerProperties(currentPlayer);
+
+            container.innerHTML = playerProperties.map(prop => `
                 <div class="asset-item">
                     <span>${prop.name}</span>
                     <input type="checkbox" onchange="toggleAssetSelection('property', '${prop.name}')">
@@ -976,37 +1006,79 @@
             const ticker = document.getElementById('ipoTicker').value.trim().toUpperCase();
             const shares = parseInt(document.getElementById('ipoShares').value);
             const pricePerShare = parseFloat(document.getElementById('ipoPrice').value);
-            
-            if (!ticker || shares <= 0 || shares > 12 || pricePerShare <= 0 || gameState.selectedAssets.length === 0) {
-                alert('Please fill in all fields and select at least one asset');
+
+            if (!ticker) {
+                alert('Please enter a ticker symbol');
+                return;
+            }
+
+            // Check for duplicate ticker
+            if (gameState.corporations.some(corp => corp.ticker === ticker)) {
+                alert('A corporation with this ticker already exists');
+                return;
+            }
+
+            if (isNaN(shares) || shares <= 0 || shares > 12) {
+                alert('Number of shares must be between 1 and 12');
+                return;
+            }
+
+            if (isNaN(pricePerShare) || pricePerShare <= 0) {
+                alert('Please enter a valid price per share');
+                return;
+            }
+
+            if (gameState.selectedAssets.length === 0) {
+                alert('Please select at least one asset to include in the IPO');
                 return;
             }
             
             const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-            
+
+            // Transfer selected assets from player to corporation
+            const transferredAssets = [];
+            gameState.selectedAssets.forEach(assetKey => {
+                const [type, id] = assetKey.split(':');
+
+                if (type === 'property') {
+                    const propIndex = currentPlayer.propertyNames.indexOf(id);
+                    if (propIndex > -1) {
+                        currentPlayer.propertyNames.splice(propIndex, 1);
+                        transferredAssets.push(assetKey);
+
+                        // Update property ownership
+                        const prop = gameState.properties.find(p => p.name === id);
+                        if (prop) {
+                            prop.owner = `${ticker} (Corporation)`;
+                        }
+                    }
+                }
+            });
+
             // Create corporation
             const corporation = {
                 ticker,
                 shares,
                 pricePerShare,
-                assets: [...gameState.selectedAssets],
+                assets: transferredAssets,
                 chairman: currentPlayer.name,
                 shareholders: { [currentPlayer.name]: shares },
                 cashBalance: 0,
                 totalShares: shares
             };
-            
+
             gameState.corporations.push(corporation);
-            
+
             // Add equity to player
             currentPlayer.equities.push({
                 ticker,
                 shares,
                 value: shares * pricePerShare
             });
-            
-            logAction(`${currentPlayer.name} created IPO ${ticker} with ${shares} shares at ${pricePerShare} each`, 'transaction');
-            
+
+            logAction(`${currentPlayer.name} created IPO ${ticker} with ${shares} shares at $${pricePerShare} each (Assets: ${transferredAssets.length})`, 'transaction');
+
+            gameState.selectedAssets = [];
             closeModal('ipoModal');
             renderGame();
         }
@@ -1015,10 +1087,11 @@
         function renderDebtAssets() {
             const container = document.getElementById('collateralAssets');
             const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-            
-            container.innerHTML = currentPlayer.properties.map(prop => `
+            const playerProperties = getPlayerProperties(currentPlayer);
+
+            container.innerHTML = playerProperties.map(prop => `
                 <div class="asset-item">
-                    <span>${prop.name} (${prop.price})</span>
+                    <span>${prop.name} ($${prop.price})</span>
                     <input type="checkbox" onchange="toggleAssetSelection('debt-collateral', '${prop.name}')">
                 </div>
             `).join('');
@@ -1065,10 +1138,12 @@
                     collateral: [...gameState.selectedAssets],
                     interestPerTurn: (amount * rate) / 100
                 };
-                
+
                 currentPlayer.cash += amount;
                 currentPlayer.debts.push(debt);
-                currentPlayer.interestOwed += debt.interestPerTurn;
+
+                // Recalculate total interest owed from all debts
+                currentPlayer.interestOwed = currentPlayer.debts.reduce((total, d) => total + d.interestPerTurn, 0);
                 
                 logAction(`${currentPlayer.name} issued debt of ${amount.toLocaleString()} at ${rate}%`, 'transaction');
             } else {
@@ -1088,16 +1163,18 @@
                 
                 currentPlayer.cash -= paymentAmount;
                 debt.amount -= paymentAmount;
-                
+
                 if (debt.amount <= 0) {
-                    currentPlayer.interestOwed -= debt.interestPerTurn;
                     currentPlayer.debts.splice(debtIndex, 1);
                     logAction(`${currentPlayer.name} paid off debt completely`, 'transaction');
                 } else {
+                    // Recalculate interest for this specific debt
                     debt.interestPerTurn = (debt.amount * debt.rate) / 100;
-                    currentPlayer.interestOwed = currentPlayer.debts.reduce((total, d) => total + d.interestPerTurn, 0);
                     logAction(`${currentPlayer.name} paid down debt by ${paymentAmount.toLocaleString()}`, 'transaction');
                 }
+
+                // Always recalculate total interest owed from all remaining debts
+                currentPlayer.interestOwed = currentPlayer.debts.reduce((total, d) => total + d.interestPerTurn, 0);
             }
             
             closeModal('debtModal');
@@ -1128,6 +1205,86 @@
                     ` : ''}
                 </div>
             `).join('');
+        }
+
+        // Collect rent
+        function collectRent() {
+            const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+            const playerProperties = getPlayerProperties(currentPlayer);
+
+            if (playerProperties.length === 0) {
+                alert('You do not own any properties to collect rent on');
+                return;
+            }
+
+            // Create property selection prompt
+            let propertyList = 'Select a property:\n';
+            playerProperties.forEach((prop, idx) => {
+                propertyList += `${idx + 1}. ${prop.name} (Base rent: $${prop.rent[0]})\n`;
+            });
+
+            const propSelection = prompt(propertyList + '\nEnter property number:');
+            if (!propSelection) return;
+
+            const propIndex = parseInt(propSelection) - 1;
+            if (propIndex < 0 || propIndex >= playerProperties.length) {
+                alert('Invalid property selection');
+                return;
+            }
+
+            const selectedProp = playerProperties[propIndex];
+
+            // Get rent level (0 = base, 1-5 = with houses/hotels)
+            const rentLevel = prompt(`${selectedProp.name}\nRent levels:\n0: Base ($${selectedProp.rent[0]})\n1: 1 House ($${selectedProp.rent[1] || 'N/A'})\n2: 2 Houses ($${selectedProp.rent[2] || 'N/A'})\n3: 3 Houses ($${selectedProp.rent[3] || 'N/A'})\n4: 4 Houses ($${selectedProp.rent[4] || 'N/A'})\n5: Hotel ($${selectedProp.rent[5] || 'N/A'})\n\nEnter rent level (0-5):`);
+
+            if (rentLevel === null) return;
+
+            const level = parseInt(rentLevel);
+            if (isNaN(level) || level < 0 || level >= selectedProp.rent.length) {
+                alert('Invalid rent level');
+                return;
+            }
+
+            const rentAmount = selectedProp.rent[level];
+
+            // Select player to pay rent
+            const activePlayers = gameState.players.filter(p => !p.bankrupt && p.name !== currentPlayer.name);
+            let playerList = 'Select player to pay rent:\n';
+            activePlayers.forEach((p, idx) => {
+                playerList += `${idx + 1}. ${p.name} (Cash: $${p.cash.toLocaleString()})\n`;
+            });
+
+            const playerSelection = prompt(playerList + '\nEnter player number:');
+            if (!playerSelection) return;
+
+            const playerIndex = parseInt(playerSelection) - 1;
+            if (playerIndex < 0 || playerIndex >= activePlayers.length) {
+                alert('Invalid player selection');
+                return;
+            }
+
+            const payingPlayer = activePlayers[playerIndex];
+
+            if (payingPlayer.cash < rentAmount) {
+                alert(`${payingPlayer.name} does not have enough cash to pay rent ($${rentAmount})`);
+                return;
+            }
+
+            // Transfer rent
+            payingPlayer.cash -= rentAmount;
+            currentPlayer.cash += rentAmount;
+
+            logAction(`${payingPlayer.name} paid $${rentAmount.toLocaleString()} rent to ${currentPlayer.name} for ${selectedProp.name}`, 'transaction');
+            renderGame();
+        }
+
+        // Pass Go
+        function passGo() {
+            const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+            const passGoAmount = gameState.settings.passGoAmount;
+            currentPlayer.cash += passGoAmount;
+            logAction(`${currentPlayer.name} passed Go and collected $${passGoAmount.toLocaleString()}`, 'transaction');
+            renderGame();
         }
 
         // Collect cash
@@ -1187,25 +1344,81 @@
             if (confirm('Are you sure you want to declare bankruptcy? This action cannot be undone.')) {
                 const currentPlayer = gameState.players[gameState.currentPlayerIndex];
                 currentPlayer.bankrupt = true;
-                
-                // Return assets to market
-                currentPlayer.properties.forEach(prop => {
-                    const originalProp = gameState.properties.find(p => p.name === prop.name);
+
+                // Handle debt collateral - seize collateralized assets
+                currentPlayer.debts.forEach(debt => {
+                    if (debt.collateral && debt.collateral.length > 0) {
+                        debt.collateral.forEach(assetKey => {
+                            const [type, id] = assetKey.split(':');
+                            if (type === 'debt-collateral') {
+                                // Properties used as collateral are returned to market
+                                const propName = id;
+                                const propIndex = currentPlayer.propertyNames.indexOf(propName);
+                                if (propIndex > -1) {
+                                    currentPlayer.propertyNames.splice(propIndex, 1);
+                                }
+                            }
+                        });
+                    }
+                });
+                currentPlayer.debts = [];
+                currentPlayer.interestOwed = 0;
+
+                // Return remaining properties to market
+                currentPlayer.propertyNames.forEach(propName => {
+                    const originalProp = gameState.properties.find(p => p.name === propName);
                     if (originalProp) {
                         originalProp.available = true;
                         originalProp.owner = null;
+                        originalProp.purchasePrice = undefined;
                     }
                 });
-                
+                currentPlayer.propertyNames = [];
+
+                // Handle corporations where player is chairman
+                gameState.corporations.forEach(corp => {
+                    if (corp.chairman === currentPlayer.name) {
+                        // Find the shareholder with the most shares (excluding bankrupt player)
+                        let maxShares = 0;
+                        let newChairman = null;
+
+                        Object.keys(corp.shareholders).forEach(name => {
+                            if (name !== currentPlayer.name && corp.shareholders[name] > maxShares) {
+                                const player = gameState.players.find(p => p.name === name);
+                                if (player && !player.bankrupt) {
+                                    maxShares = corp.shareholders[name];
+                                    newChairman = name;
+                                }
+                            }
+                        });
+
+                        if (newChairman) {
+                            corp.chairman = newChairman;
+                            logAction(`${corp.ticker} chairmanship transferred to ${newChairman}`, 'transaction');
+                        } else {
+                            // No valid chairman - corporation dissolved
+                            logAction(`${corp.ticker} dissolved - no valid chairman`, 'bankruptcy');
+                        }
+                    }
+
+                    // Remove bankrupt player from shareholders
+                    if (corp.shareholders[currentPlayer.name]) {
+                        delete corp.shareholders[currentPlayer.name];
+                    }
+                });
+
+                // Clear player's equities
+                currentPlayer.equities = [];
+
                 logAction(`${currentPlayer.name} declared bankruptcy`, 'bankruptcy');
-                
+
                 // Check if game should end
                 const activePlayers = gameState.players.filter(p => !p.bankrupt);
                 if (activePlayers.length <= 1) {
                     alert(`Game Over! ${activePlayers[0]?.name || 'No one'} wins!`);
                     return;
                 }
-                
+
                 endTurn();
             }
         }
@@ -1213,22 +1426,94 @@
         // Update market selects
         function updateMarketSelects() {
             const playerSelects = ['player1Select', 'player2Select', 'paymentFromPlayer', 'paymentToPlayer'];
-            
+
             playerSelects.forEach(selectId => {
                 const select = document.getElementById(selectId);
                 if (select) {
-                    select.innerHTML = gameState.players.filter(p => !p.bankrupt).map(player => 
+                    select.innerHTML = gameState.players.filter(p => !p.bankrupt).map(player =>
                         `<option value="${player.name}">${player.name}</option>`
                     ).join('');
-                    
+
                     // Add corporations to payment selects
                     if (selectId === 'paymentToPlayer') {
-                        select.innerHTML += gameState.corporations.map(corp => 
+                        select.innerHTML += gameState.corporations.map(corp =>
                             `<option value="corp:${corp.ticker}">${corp.ticker} (LLC)</option>`
                         ).join('');
                     }
                 }
             });
+
+            // Add event listeners for player selection changes in market
+            const player1Select = document.getElementById('player1Select');
+            const player2Select = document.getElementById('player2Select');
+
+            if (player1Select && !player1Select.dataset.listenerAdded) {
+                player1Select.addEventListener('change', () => renderMarketAssets('player1'));
+                player1Select.dataset.listenerAdded = 'true';
+            }
+
+            if (player2Select && !player2Select.dataset.listenerAdded) {
+                player2Select.addEventListener('change', () => renderMarketAssets('player2'));
+                player2Select.dataset.listenerAdded = 'true';
+            }
+
+            // Initial render of market assets
+            renderMarketAssets('player1');
+            renderMarketAssets('player2');
+        }
+
+        // Render market assets for trading
+        function renderMarketAssets(playerNum) {
+            const selectId = `${playerNum}Select`;
+            const containerSelectId = `${playerNum}Assets`;
+            const playerName = document.getElementById(selectId)?.value;
+
+            if (!playerName) return;
+
+            const player = gameState.players.find(p => p.name === playerName);
+            if (!player) return;
+
+            const container = document.getElementById(containerSelectId);
+            const playerProperties = getPlayerProperties(player);
+
+            let html = '<h4 style="margin: 10px 0;">Properties:</h4>';
+            if (playerProperties.length > 0) {
+                html += playerProperties.map(prop => `
+                    <div class="asset-item">
+                        <span>${prop.name} ($${prop.price})</span>
+                        <input type="checkbox" onchange="toggleMarketAsset('${playerNum}', 'property', '${prop.name}')">
+                    </div>
+                `).join('');
+            } else {
+                html += '<p style="padding: 10px; color: #7f8c8d;">No properties</p>';
+            }
+
+            html += '<h4 style="margin: 10px 0;">Equities:</h4>';
+            if (player.equities.length > 0) {
+                html += player.equities.map((equity, idx) => `
+                    <div class="asset-item">
+                        <span>${equity.ticker} (${equity.shares} shares)</span>
+                        <input type="checkbox" onchange="toggleMarketAsset('${playerNum}', 'equity', ${idx})">
+                    </div>
+                `).join('');
+            } else {
+                html += '<p style="padding: 10px; color: #7f8c8d;">No equities</p>';
+            }
+
+            container.innerHTML = html;
+        }
+
+        // Toggle market asset selection
+        function toggleMarketAsset(playerNum, type, id) {
+            const assetKey = `${type}:${id}`;
+            const selectedArray = gameState.marketTransaction[`${playerNum}SelectedAssets`];
+            const index = selectedArray.indexOf(assetKey);
+
+            if (index > -1) {
+                selectedArray.splice(index, 1);
+            } else {
+                selectedArray.push(assetKey);
+            }
         }
 
         // Execute transaction
@@ -1237,32 +1522,90 @@
             const player2Name = document.getElementById('player2Select').value;
             const player1Cash = parseFloat(document.getElementById('player1Cash').value) || 0;
             const player2Cash = parseFloat(document.getElementById('player2Cash').value) || 0;
-            
+
             if (player1Name === player2Name) {
                 alert('Cannot trade with yourself');
                 return;
             }
-            
+
             const player1 = gameState.players.find(p => p.name === player1Name);
             const player2 = gameState.players.find(p => p.name === player2Name);
-            
+
             if (player1Cash > player1.cash || player2Cash > player2.cash) {
                 alert('Insufficient funds for transaction');
                 return;
             }
-            
+
             // Execute cash exchange
             player1.cash -= player1Cash;
             player1.cash += player2Cash;
             player2.cash -= player2Cash;
             player2.cash += player1Cash;
-            
-            logAction(`Market transaction: ${player1Name} ↔ ${player2Name} - ${player1Cash} ↔ ${player2Cash}`, 'transaction');
-            
+
+            let transactionDetails = [`Cash: $${player1Cash} ↔ $${player2Cash}`];
+
+            // Transfer assets from player1 to player2
+            gameState.marketTransaction.player1SelectedAssets.forEach(assetKey => {
+                const [type, id] = assetKey.split(':');
+
+                if (type === 'property') {
+                    const propIndex = player1.propertyNames.indexOf(id);
+                    if (propIndex > -1) {
+                        player1.propertyNames.splice(propIndex, 1);
+                        player2.propertyNames.push(id);
+
+                        const prop = gameState.properties.find(p => p.name === id);
+                        if (prop) {
+                            prop.owner = player2Name;
+                        }
+                        transactionDetails.push(`${id} → ${player2Name}`);
+                    }
+                } else if (type === 'equity') {
+                    const equityIndex = parseInt(id);
+                    const equity = player1.equities[equityIndex];
+                    if (equity) {
+                        player1.equities.splice(equityIndex, 1);
+                        player2.equities.push(equity);
+                        transactionDetails.push(`${equity.shares} shares of ${equity.ticker} → ${player2Name}`);
+                    }
+                }
+            });
+
+            // Transfer assets from player2 to player1
+            gameState.marketTransaction.player2SelectedAssets.forEach(assetKey => {
+                const [type, id] = assetKey.split(':');
+
+                if (type === 'property') {
+                    const propIndex = player2.propertyNames.indexOf(id);
+                    if (propIndex > -1) {
+                        player2.propertyNames.splice(propIndex, 1);
+                        player1.propertyNames.push(id);
+
+                        const prop = gameState.properties.find(p => p.name === id);
+                        if (prop) {
+                            prop.owner = player1Name;
+                        }
+                        transactionDetails.push(`${id} → ${player1Name}`);
+                    }
+                } else if (type === 'equity') {
+                    const equityIndex = parseInt(id);
+                    const equity = player2.equities[equityIndex];
+                    if (equity) {
+                        player2.equities.splice(equityIndex, 1);
+                        player1.equities.push(equity);
+                        transactionDetails.push(`${equity.shares} shares of ${equity.ticker} → ${player1Name}`);
+                    }
+                }
+            });
+
+            logAction(`Market transaction: ${player1Name} ↔ ${player2Name}: ${transactionDetails.join(', ')}`, 'transaction');
+
             // Reset form
             document.getElementById('player1Cash').value = 0;
             document.getElementById('player2Cash').value = 0;
-            
+            gameState.marketTransaction.player1SelectedAssets = [];
+            gameState.marketTransaction.player2SelectedAssets = [];
+
             renderGame();
         }
 
@@ -1346,7 +1689,13 @@
                     selectedProperty: null,
                     selectedAssets: []
                 };
-                showSection('setup');
+
+                // Switch to setup tab
+                document.querySelectorAll('.section').forEach(section => section.classList.remove('active'));
+                document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
+                document.getElementById('setup').classList.add('active');
+                document.querySelectorAll('.nav-tab')[0].classList.add('active');
+                renderGame();
             }
         }
 
@@ -1368,16 +1717,42 @@
 
         // Placeholder functions for advanced features
         function distributeDividends(ticker) {
-            const amount = prompt(`Enter dividend amount to distribute for ${ticker}:`);
+            const amount = prompt(`Enter total dividend amount to distribute for ${ticker}:`);
             if (amount && !isNaN(amount) && parseFloat(amount) > 0) {
+                const totalDividend = parseFloat(amount);
                 const corp = gameState.corporations.find(c => c.ticker === ticker);
-                if (corp && corp.cashBalance >= parseFloat(amount)) {
-                    corp.cashBalance -= parseFloat(amount);
-                    logAction(`${ticker} distributed ${parseFloat(amount).toLocaleString()} in dividends`, 'transaction');
-                    renderGame();
-                } else {
-                    alert('Insufficient corporate funds');
+
+                if (!corp) {
+                    alert('Corporation not found');
+                    return;
                 }
+
+                if (corp.cashBalance < totalDividend) {
+                    alert('Insufficient corporate funds');
+                    return;
+                }
+
+                // Deduct from corporation
+                corp.cashBalance -= totalDividend;
+
+                // Distribute to shareholders proportionally
+                const dividendPerShare = totalDividend / corp.totalShares;
+                let distributionLog = [];
+
+                Object.keys(corp.shareholders).forEach(shareholderName => {
+                    const sharesOwned = corp.shareholders[shareholderName];
+                    if (sharesOwned > 0) {
+                        const dividendAmount = dividendPerShare * sharesOwned;
+                        const player = gameState.players.find(p => p.name === shareholderName);
+                        if (player) {
+                            player.cash += dividendAmount;
+                            distributionLog.push(`${shareholderName}: $${dividendAmount.toFixed(2)}`);
+                        }
+                    }
+                });
+
+                logAction(`${ticker} distributed $${totalDividend.toLocaleString()} in dividends (${distributionLog.join(', ')})`, 'transaction');
+                renderGame();
             }
         }
 
