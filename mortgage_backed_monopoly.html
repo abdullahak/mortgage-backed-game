@@ -502,6 +502,7 @@
                     <input type="number" id="passGoAmount" min="0" step="50" value="200">
                 </div>
                 <button class="btn" onclick="updateSettings()">Update Settings</button>
+                <button class="btn btn-success" onclick="saveGame()">Save Game</button>
                 <button class="btn btn-danger" onclick="endGame()">End Game & Declare Winner</button>
                 <button class="btn btn-secondary" onclick="resetGame()">Reset Game</button>
             </div>
@@ -601,6 +602,17 @@
         </div>
     </div>
 
+    <div class="modal" id="buildHousesModal">
+        <div class="modal-content">
+            <div class="modal-header">Build Houses & Hotels</div>
+            <p style="margin-bottom: 15px; color: #7f8c8d;">Select a property to manage buildings. House cost: $50, Hotel cost: $50</p>
+            <div class="property-grid" id="buildableProperties"></div>
+            <div style="text-align: center; margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="closeModal('buildHousesModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Game State
         let gameState = {
@@ -679,6 +691,13 @@
 
         // Setup game
         function setupGame() {
+            const gameMode = document.getElementById('gameMode').value;
+
+            if (gameMode === 'load') {
+                loadGame();
+                return;
+            }
+
             const playerCount = parseInt(document.getElementById('playerCount').value);
 
             // Validate player count
@@ -798,6 +817,7 @@
                     </div>
                     <div class="actions">
                         <button class="btn" onclick="openModal('buyPropertyModal')">Buy Property</button>
+                        <button class="btn" onclick="openModal('buildHousesModal')">Build Houses/Hotels</button>
                         <button class="btn" onclick="openModal('ipoModal')">IPO</button>
                         <button class="btn" onclick="openModal('debtModal')">Issue & Settle Debt</button>
                         <button class="btn" onclick="openModal('corporationModal')">Manage Corporations</button>
@@ -892,6 +912,8 @@
                 renderDebtAssets();
             } else if (modalId === 'corporationModal') {
                 renderCorporations();
+            } else if (modalId === 'buildHousesModal') {
+                renderBuildableProperties();
             }
         }
 
@@ -1178,6 +1200,93 @@
             }
             
             closeModal('debtModal');
+            renderGame();
+        }
+
+        // Render buildable properties
+        function renderBuildableProperties() {
+            const container = document.getElementById('buildableProperties');
+            const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+            const playerProperties = getPlayerProperties(currentPlayer);
+
+            // Filter to only color properties (not railroads or utilities)
+            const buildableProps = playerProperties.filter(prop =>
+                prop.color !== 'Railroad' && prop.color !== 'Utility'
+            );
+
+            if (buildableProps.length === 0) {
+                container.innerHTML = '<p style="padding: 20px; text-align: center; color: #7f8c8d;">You don\'t own any properties that can have buildings.</p>';
+                return;
+            }
+
+            container.innerHTML = buildableProps.map(prop => {
+                const housesText = prop.houses === 0 ? 'No buildings' :
+                                   prop.houses === 5 ? 'Hotel' :
+                                   `${prop.houses} house${prop.houses > 1 ? 's' : ''}`;
+
+                return `
+                    <div class="property-card" style="background: ${getColorCode(prop.color)}15; border-color: ${getColorCode(prop.color)};">
+                        <div style="font-weight: bold; margin-bottom: 10px;">${prop.name}</div>
+                        <div style="font-size: 0.9em; margin-bottom: 10px;">${housesText}</div>
+                        <button class="btn" onclick="buildHouse('${prop.name}')" style="width: 100%; margin: 2px 0; padding: 8px;" ${prop.houses >= 5 ? 'disabled' : ''}>
+                            ${prop.houses === 4 ? 'Build Hotel' : 'Build House'} ($50)
+                        </button>
+                        <button class="btn btn-danger" onclick="sellHouse('${prop.name}')" style="width: 100%; margin: 2px 0; padding: 8px;" ${prop.houses === 0 ? 'disabled' : ''}>
+                            ${prop.houses === 5 ? 'Sell Hotel' : 'Sell House'} ($25)
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Build house/hotel
+        function buildHouse(propertyName) {
+            const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+            const prop = gameState.properties.find(p => p.name === propertyName);
+
+            if (!prop) return;
+
+            const cost = 50;
+            if (currentPlayer.cash < cost) {
+                alert('Insufficient funds to build');
+                return;
+            }
+
+            if (prop.houses >= 5) {
+                alert('Property already has a hotel');
+                return;
+            }
+
+            currentPlayer.cash -= cost;
+            prop.houses++;
+
+            const buildingType = prop.houses === 5 ? 'hotel' : 'house';
+            logAction(`${currentPlayer.name} built a ${buildingType} on ${propertyName} for $${cost}`, 'transaction');
+
+            renderBuildableProperties();
+            renderGame();
+        }
+
+        // Sell house/hotel
+        function sellHouse(propertyName) {
+            const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+            const prop = gameState.properties.find(p => p.name === propertyName);
+
+            if (!prop) return;
+
+            if (prop.houses === 0) {
+                alert('No buildings to sell');
+                return;
+            }
+
+            const refund = 25;
+            currentPlayer.cash += refund;
+            prop.houses--;
+
+            const buildingType = prop.houses === 4 ? 'hotel' : 'house';
+            logAction(`${currentPlayer.name} sold a ${buildingType} from ${propertyName} for $${refund}`, 'transaction');
+
+            renderBuildableProperties();
             renderGame();
         }
 
@@ -1543,6 +1652,7 @@
             player2.cash += player1Cash;
 
             let transactionDetails = [`Cash: $${player1Cash} ↔ $${player2Cash}`];
+            const tradedTickers = new Set(); // Track which corporations had equity traded
 
             // Transfer assets from player1 to player2
             gameState.marketTransaction.player1SelectedAssets.forEach(assetKey => {
@@ -1564,8 +1674,20 @@
                     const equityIndex = parseInt(id);
                     const equity = player1.equities[equityIndex];
                     if (equity) {
+                        tradedTickers.add(equity.ticker); // Track ticker for chairman update
                         player1.equities.splice(equityIndex, 1);
                         player2.equities.push(equity);
+
+                        // Update corporation shareholder list
+                        const corp = gameState.corporations.find(c => c.ticker === equity.ticker);
+                        if (corp) {
+                            corp.shareholders[player1Name] = (corp.shareholders[player1Name] || 0) - equity.shares;
+                            if (corp.shareholders[player1Name] <= 0) {
+                                delete corp.shareholders[player1Name];
+                            }
+                            corp.shareholders[player2Name] = (corp.shareholders[player2Name] || 0) + equity.shares;
+                        }
+
                         transactionDetails.push(`${equity.shares} shares of ${equity.ticker} → ${player2Name}`);
                     }
                 }
@@ -1591,9 +1713,44 @@
                     const equityIndex = parseInt(id);
                     const equity = player2.equities[equityIndex];
                     if (equity) {
+                        tradedTickers.add(equity.ticker); // Track ticker for chairman update
                         player2.equities.splice(equityIndex, 1);
                         player1.equities.push(equity);
+
+                        // Update corporation shareholder list
+                        const corp = gameState.corporations.find(c => c.ticker === equity.ticker);
+                        if (corp) {
+                            corp.shareholders[player2Name] = (corp.shareholders[player2Name] || 0) - equity.shares;
+                            if (corp.shareholders[player2Name] <= 0) {
+                                delete corp.shareholders[player2Name];
+                            }
+                            corp.shareholders[player1Name] = (corp.shareholders[player1Name] || 0) + equity.shares;
+                        }
+
                         transactionDetails.push(`${equity.shares} shares of ${equity.ticker} → ${player1Name}`);
+                    }
+                }
+            });
+
+            // Update corporation chairmanship if needed
+            tradedTickers.forEach(ticker => {
+                const corp = gameState.corporations.find(c => c.ticker === ticker);
+                if (corp) {
+                    // Find shareholder with most shares
+                    let maxShares = 0;
+                    let maxShareholder = null;
+                    Object.keys(corp.shareholders).forEach(name => {
+                        if (corp.shareholders[name] > maxShares) {
+                            const player = gameState.players.find(p => p.name === name);
+                            if (player && !player.bankrupt) {
+                                maxShares = corp.shareholders[name];
+                                maxShareholder = name;
+                            }
+                        }
+                    });
+                    if (maxShareholder && corp.chairman !== maxShareholder) {
+                        corp.chairman = maxShareholder;
+                        logAction(`${ticker} chairmanship transferred to ${maxShareholder} (largest shareholder)`, 'transaction');
                     }
                 }
             });
@@ -1687,7 +1844,11 @@
                         passGoAmount: 200
                     },
                     selectedProperty: null,
-                    selectedAssets: []
+                    selectedAssets: [],
+                    marketTransaction: {
+                        player1SelectedAssets: [],
+                        player2SelectedAssets: []
+                    }
                 };
 
                 // Switch to setup tab
@@ -1773,15 +1934,87 @@
         function transferChairman(ticker) {
             const corp = gameState.corporations.find(c => c.ticker === ticker);
             const shareholders = Object.keys(corp.shareholders).filter(name => corp.shareholders[name] > 0);
-            
+
             const newChairman = prompt(`Transfer chairman of ${ticker} to:\n${shareholders.map((name, i) => `${i + 1}. ${name}`).join('\n')}\n\nEnter player name:`);
-            
+
             if (newChairman && shareholders.includes(newChairman)) {
                 corp.chairman = newChairman;
                 logAction(`${ticker} chairman transferred to ${newChairman}`, 'transaction');
                 renderGame();
             }
         }
+
+        // Save game to localStorage
+        function saveGame() {
+            if (gameState.players.length === 0) {
+                alert('No game to save');
+                return;
+            }
+
+            try {
+                const saveData = {
+                    gameState: JSON.parse(JSON.stringify(gameState)),
+                    timestamp: new Date().toISOString(),
+                    version: '1.0'
+                };
+                localStorage.setItem('mortgageBackedMonopolySave', JSON.stringify(saveData));
+                alert('Game saved successfully!');
+                logAction('Game saved', 'general');
+            } catch (e) {
+                alert('Failed to save game: ' + e.message);
+            }
+        }
+
+        // Load game from localStorage
+        function loadGame() {
+            try {
+                const saveData = localStorage.getItem('mortgageBackedMonopolySave');
+                if (!saveData) {
+                    alert('No saved game found');
+                    return;
+                }
+
+                const parsed = JSON.parse(saveData);
+                if (!parsed.gameState) {
+                    alert('Invalid save data');
+                    return;
+                }
+
+                // Restore game state
+                gameState = parsed.gameState;
+
+                alert(`Game loaded from ${new Date(parsed.timestamp).toLocaleString()}`);
+                logAction('Game loaded from save', 'general');
+
+                // Switch to game tab
+                document.querySelectorAll('.section').forEach(section => section.classList.remove('active'));
+                document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
+                document.getElementById('game').classList.add('active');
+                document.querySelectorAll('.nav-tab')[1].classList.add('active');
+
+                renderGame();
+            } catch (e) {
+                alert('Failed to load game: ' + e.message);
+            }
+        }
+
+        // Auto-save every 2 minutes
+        setInterval(() => {
+            if (gameState.players.length > 0) {
+                try {
+                    const saveData = {
+                        gameState: JSON.parse(JSON.stringify(gameState)),
+                        timestamp: new Date().toISOString(),
+                        version: '1.0',
+                        autoSave: true
+                    };
+                    localStorage.setItem('mortgageBackedMonopolyAutoSave', JSON.stringify(saveData));
+                    console.log('Auto-saved at ' + new Date().toLocaleTimeString());
+                } catch (e) {
+                    console.error('Auto-save failed:', e);
+                }
+            }
+        }, 120000); // Every 2 minutes
     </script>
 </body>
 </html>
