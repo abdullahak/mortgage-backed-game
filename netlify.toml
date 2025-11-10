@@ -1,0 +1,38 @@
+# Netlify configuration for Mortgage Backed Monopoly
+
+[build]
+  # No build command needed - static HTML
+  publish = "."
+
+[build.environment]
+  NODE_VERSION = "18"
+
+# Redirect all requests to index page (for direct HTML access)
+[[redirects]]
+  from = "/"
+  to = "/mortgage_backed_monopoly.html"
+  status = 200
+
+# Security headers
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+
+# Cache static assets
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# Settings
+[dev]
+  command = "python3 -m http.server 8888"
+  targetPort = 8888
+  port = 8888
+  publish = "."
+  autoLaunch = true

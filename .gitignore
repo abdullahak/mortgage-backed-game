@@ -1,3 +1,7 @@
+# Netlify
+.netlify/
+.netlify-state.json
+
 # OS files
 .DS_Store
 .DS_Store?
@@ -12,8 +16,21 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+*.sublime-*
 
 # Google Drive files
 *.gdoc
 *.gsheet
 *.gslides
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*~
+
+# Local development
+.AppleDouble
+.LSOverride
+Desktop.ini
+$RECYCLE.BIN/

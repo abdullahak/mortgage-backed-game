@@ -1,0 +1,6 @@
+# Netlify redirects file
+# Redirect root to the game
+/    /mortgage_backed_monopoly.html    200
+
+# Catch-all redirect for any 404s back to the game
+/*   /mortgage_backed_monopoly.html    200
