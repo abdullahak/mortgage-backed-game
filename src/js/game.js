@@ -38,13 +38,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     } catch (error) {
         console.error('Error initializing game:', error);
-        alert('Failed to load game');
+        console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            roomId: new URLSearchParams(window.location.search).get('room')
+        });
+        alert('Failed to load game: ' + error.message + '\n\nCheck browser console for details.');
     }
 });
 
 // Load game and room data
 async function loadGameData(roomId) {
     try {
+        console.log('Loading game data for room:', roomId);
+
         // Load room data
         const { data: room, error: roomError } = await supabase
             .from('rooms')
@@ -52,7 +59,10 @@ async function loadGameData(roomId) {
             .eq('id', roomId)
             .single();
 
-        if (roomError) throw roomError;
+        console.log('Room query result:', { room, roomError });
+        if (roomError) throw new Error(`Room error: ${roomError.message}`);
+        if (!room) throw new Error('Room not found');
+
         currentRoom = room;
 
         // Display room info
@@ -66,12 +76,22 @@ async function loadGameData(roomId) {
             .eq('room_id', roomId)
             .single();
 
-        if (gameError) throw gameError;
+        console.log('Game query result:', { game, gameError });
+        if (gameError) throw new Error(`Game error: ${gameError.message}`);
+        if (!game) throw new Error('Game not found for this room');
+
         currentGame = game;
 
         // Find current player data
         const gameState = game.game_state;
+        console.log('Game state:', gameState);
+
         currentPlayerData = gameState.players.find(p => p.userId === currentUser.id);
+        console.log('Current player data:', currentPlayerData);
+
+        if (!currentPlayerData) {
+            throw new Error('You are not a player in this game');
+        }
 
         // Render game state
         renderGameState(gameState);
