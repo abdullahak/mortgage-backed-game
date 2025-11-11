@@ -173,22 +173,58 @@ function updateStartButtonState(playerCount) {
 // Copy invite code to clipboard
 function copyInviteCode() {
     const code = document.getElementById('invite-code').textContent;
+    const btn = event.target;
+    const originalText = btn.textContent;
 
-    navigator.clipboard.writeText(code).then(() => {
-        // Visual feedback
-        const btn = event.target;
-        const originalText = btn.textContent;
-        btn.textContent = 'Copied!';
-        btn.style.background = 'linear-gradient(45deg, #2ecc71, #27ae60)';
+    // Try modern clipboard API first
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(code).then(() => {
+            // Visual feedback
+            btn.textContent = 'Copied!';
+            btn.style.background = 'linear-gradient(45deg, #2ecc71, #27ae60)';
 
-        setTimeout(() => {
-            btn.textContent = originalText;
-            btn.style.background = '';
-        }, 2000);
-    }).catch(err => {
-        console.error('Failed to copy:', err);
-        alert('Failed to copy code. Code is: ' + code);
-    });
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.style.background = '';
+            }, 2000);
+        }).catch(err => {
+            console.error('Clipboard API failed:', err);
+            fallbackCopyToClipboard(code, btn, originalText);
+        });
+    } else {
+        // Fallback for older browsers
+        fallbackCopyToClipboard(code, btn, originalText);
+    }
+}
+
+// Fallback copy method using textarea
+function fallbackCopyToClipboard(text, btn, originalText) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+            btn.textContent = 'Copied!';
+            btn.style.background = 'linear-gradient(45deg, #2ecc71, #27ae60)';
+
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.style.background = '';
+            }, 2000);
+        } else {
+            alert('Code: ' + text + '\n\nPlease copy manually.');
+        }
+    } catch (err) {
+        console.error('Fallback copy failed:', err);
+        alert('Code: ' + text + '\n\nPlease copy manually.');
+    } finally {
+        document.body.removeChild(textarea);
+    }
 }
 
 // Start game (host only)
