@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Waiting Room - Mortgage Backed Monopoly</title>
+    <link rel="stylesheet" href="src/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Mortgage Backed Monopoly</h1>
+            <p><em>If they did it in 2008, it's fair game</em></p>
+            <div class="user-info">
+                <span id="user-email"></span>
+                <button class="btn btn-secondary btn-sm" onclick="leaveRoom()">Leave Room</button>
+            </div>
+        </div>
+
+        <div class="content">
+            <div class="waiting-room-container">
+                <!-- Room Info Header -->
+                <div class="room-header-info">
+                    <h2 id="room-name">Loading...</h2>
+                    <div class="room-meta">
+                        <span class="room-status waiting" id="room-status">Waiting for players</span>
+                        <span id="player-count">0/4 players</span>
+                    </div>
+                </div>
+
+                <!-- Invite Code Display -->
+                <div class="invite-code-display">
+                    <h3>Share this code with your friends:</h3>
+                    <div class="invite-code-large" id="invite-code">------</div>
+                    <button class="btn btn-sm" onclick="copyInviteCode()">Copy Code</button>
+                </div>
+
+                <!-- Players List -->
+                <div class="players-section">
+                    <h3>Players in Room</h3>
+                    <div class="players-list" id="players-list">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading players...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Host Controls -->
+                <div class="host-controls" id="host-controls" style="display: none;">
+                    <div style="text-align: center; margin-top: 30px;">
+                        <button class="btn btn-success btn-large" onclick="startGame()" id="start-game-btn">
+                            Start Game
+                        </button>
+                        <p style="margin-top: 10px; color: #7f8c8d;">
+                            Need at least 2 players to start
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Game Log -->
+                <div class="room-log">
+                    <h4>Activity</h4>
+                    <div id="activity-log" class="game-log" style="max-height: 200px;">
+                        <div class="log-entry">Waiting for players to join...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="src/js/config.js"></script>
+    <script src="src/js/supabase.js"></script>
+    <script src="src/js/waiting.js"></script>
+</body>
+</html>
