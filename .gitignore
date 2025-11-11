@@ -17,3 +17,5 @@ Thumbs.db
 *.gdoc
 *.gsheet
 *.gslides
+# Local Netlify folder
+.netlify
