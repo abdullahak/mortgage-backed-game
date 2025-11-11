@@ -228,7 +228,7 @@ function fallbackCopyToClipboard(text, btn, originalText) {
 }
 
 // Start game (host only)
-async function startGame() {
+async function startGameFromLobby() {
     if (!isHost) {
         alert('Only the host can start the game');
         return;
@@ -272,7 +272,7 @@ async function startGame() {
             }
         };
 
-        // Start the game
+        // Start the game (calls helper function from supabase.js)
         const game = await startGame(roomId, initialGameState);
 
         logActivity('Game started! Redirecting...');
