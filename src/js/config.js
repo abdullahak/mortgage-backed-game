@@ -1,9 +1,6 @@
 // Supabase configuration
-// You'll need to replace these with your actual Supabase project credentials
-// Get these from: https://app.supabase.com/project/_/settings/api
-
-const SUPABASE_URL = 'YOUR_SUPABASE_URL_HERE'; // e.g., 'https://xxxxx.supabase.co'
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY_HERE'; // Your anon/public key
+const SUPABASE_URL = 'https://scpkafqiooxfvycwzqla.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjcGthZnFpb294ZnZ5Y3d6cWxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTU1MTksImV4cCI6MjA3ODM5MTUxOX0.nl__3JFaZWIDPc8zAo4LQ0JQC-3gdQGErjqAURNHSwM';
 
 // Initialize Supabase client
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
