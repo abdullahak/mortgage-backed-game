@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game - Mortgage Backed Monopoly</title>
+    <link rel="stylesheet" href="src/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Mortgage Backed Monopoly</h1>
+            <p><em>If they did it in 2008, it's fair game</em></p>
+            <div class="user-info">
+                <span id="user-email"></span>
+                <span id="room-code" style="margin-left: 20px; font-family: monospace; background: rgba(102, 126, 234, 0.1); padding: 5px 10px; border-radius: 5px;"></span>
+            </div>
+        </div>
+
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="showSection('game')">Game</button>
+            <button class="nav-tab" onclick="showSection('market')">Market</button>
+            <button class="nav-tab" onclick="showSection('log')">Log</button>
+        </div>
+
+        <div class="content">
+            <!-- Game Section -->
+            <div class="section active" id="game">
+                <div id="gameContent">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading game...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Market Section -->
+            <div class="section" id="market">
+                <h2>Secondary Market</h2>
+                <div class="transaction-form">
+                    <div class="transaction-side">
+                        <h3>Player 1 Offers</h3>
+                        <div class="form-group">
+                            <label>Player:</label>
+                            <select id="player1Select"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Cash:</label>
+                            <input type="number" id="player1Cash" min="0" value="0">
+                        </div>
+                        <div class="asset-list" id="player1Assets"></div>
+                    </div>
+                    <div class="transaction-side">
+                        <h3>Player 2 Offers</h3>
+                        <div class="form-group">
+                            <label>Player:</label>
+                            <select id="player2Select"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Cash:</label>
+                            <input type="number" id="player2Cash" min="0" value="0">
+                        </div>
+                        <div class="asset-list" id="player2Assets"></div>
+                    </div>
+                </div>
+                <div style="text-align: center;">
+                    <button class="btn btn-success" onclick="executeTransaction()">Execute Transaction</button>
+                </div>
+
+                <h3 style="margin-top: 30px;">Payment System</h3>
+                <div class="form-group">
+                    <label>From Player:</label>
+                    <select id="paymentFromPlayer"></select>
+                </div>
+                <div class="form-group">
+                    <label>To Player/LLC:</label>
+                    <select id="paymentToPlayer"></select>
+                </div>
+                <div class="form-group">
+                    <label>Amount:</label>
+                    <input type="number" id="paymentAmount" min="0" step="0.01">
+                </div>
+                <button class="btn btn-success" onclick="makePayment()">Make Payment</button>
+            </div>
+
+            <!-- Log Section -->
+            <div class="section" id="log">
+                <h2>Game Log</h2>
+                <div class="game-log" id="full-game-log" style="max-height: 600px;">
+                    <div class="loading">
+                        <p>Loading game history...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal" id="buyPropertyModal">
+        <div class="modal-content">
+            <div class="modal-header">Buy Property</div>
+            <div class="property-grid" id="availableProperties"></div>
+            <div class="form-group">
+                <label>Purchase Price:</label>
+                <input type="number" id="purchasePrice" min="0" step="50">
+            </div>
+            <div style="text-align: center;">
+                <button class="btn btn-success" onclick="confirmPurchase()">Buy Property</button>
+                <button class="btn btn-secondary" onclick="closeModal('buyPropertyModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="ipoModal">
+        <div class="modal-content">
+            <div class="modal-header">Create IPO</div>
+            <div class="form-group">
+                <label>Ticker Symbol:</label>
+                <input type="text" id="ipoTicker" placeholder="e.g., PROP" style="text-transform: uppercase;">
+            </div>
+            <div class="form-group">
+                <label>Number of Shares (1-12):</label>
+                <input type="number" id="ipoShares" min="1" max="12" value="1">
+            </div>
+            <div class="form-group">
+                <label>Price per Share:</label>
+                <input type="number" id="ipoPrice" min="0" step="0.01">
+            </div>
+            <div class="form-group">
+                <label>Select Assets to Include:</label>
+                <div class="asset-list" id="ipoAssets"></div>
+            </div>
+            <div style="text-align: center;">
+                <button class="btn btn-success" onclick="createIPO()">Create IPO</button>
+                <button class="btn btn-secondary" onclick="closeModal('ipoModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="debtModal">
+        <div class="modal-content">
+            <div class="modal-header">Debt Management</div>
+            <div class="form-group">
+                <label>Action:</label>
+                <select id="debtAction" onchange="toggleDebtForm()">
+                    <option value="issue">Issue New Debt</option>
+                    <option value="settle">Settle Existing Debt</option>
+                </select>
+            </div>
+            <div id="issueDebtForm">
+                <div class="form-group">
+                    <label>Loan Amount:</label>
+                    <input type="number" id="loanAmount" min="0" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Interest Rate (%):</label>
+                    <input type="number" id="loanRate" min="0" max="100" step="0.1" value="5">
+                </div>
+                <div class="form-group">
+                    <label>Collateral Assets:</label>
+                    <div class="asset-list" id="collateralAssets"></div>
+                </div>
+            </div>
+            <div id="settleDebtForm" style="display: none;">
+                <div class="form-group">
+                    <label>Select Debt to Settle:</label>
+                    <select id="debtToSettle"></select>
+                </div>
+                <div class="form-group">
+                    <label>Payment Amount:</label>
+                    <input type="number" id="settlementAmount" min="0" step="0.01">
+                </div>
+            </div>
+            <div style="text-align: center;">
+                <button class="btn btn-success" onclick="processDebt()">Process</button>
+                <button class="btn btn-secondary" onclick="closeModal('debtModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="corporationModal">
+        <div class="modal-content">
+            <div class="modal-header">Manage Corporations</div>
+            <div id="corporationList"></div>
+            <div style="text-align: center;">
+                <button class="btn btn-secondary" onclick="closeModal('corporationModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="src/js/config.js"></script>
+    <script src="src/js/supabase.js"></script>
+    <script src="src/js/game.js"></script>
+</body>
+</html>
