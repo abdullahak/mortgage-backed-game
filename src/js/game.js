@@ -622,8 +622,7 @@ async function logGameEvent(eventType, eventData) {
         .from('game_events')
         .insert({
             game_id: currentGame.id,
-            room_id: currentRoom.id,
-            user_id: currentUser.id,
+            player_id: currentUser.id,
             event_type: eventType,
             event_data: eventData
         });
