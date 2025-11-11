@@ -163,10 +163,7 @@ async function getRoomById(roomId) {
             .from('rooms')
             .select(`
                 *,
-                room_members (
-                    *,
-                    users:user_id (email)
-                )
+                room_members (*)
             `)
             .eq('id', roomId)
             .single();
