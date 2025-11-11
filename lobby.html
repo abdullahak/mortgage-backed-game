@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lobby - Mortgage Backed Monopoly</title>
+    <link rel="stylesheet" href="src/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Mortgage Backed Monopoly</h1>
+            <p><em>If they did it in 2008, it's fair game</em></p>
+            <div class="user-info">
+                <span id="user-email"></span>
+                <button class="btn btn-secondary btn-sm" onclick="handleLogout()">Logout</button>
+            </div>
+        </div>
+
+        <div class="content">
+            <div class="lobby-container">
+                <h2>Game Lobby</h2>
+
+                <div class="lobby-actions">
+                    <button class="btn btn-primary" onclick="showCreateRoomModal()">Create New Game</button>
+                    <button class="btn" onclick="showJoinRoomModal()">Join Game with Code</button>
+                </div>
+
+                <div class="rooms-section">
+                    <h3>Your Active Games</h3>
+                    <div id="active-rooms-list" class="rooms-list">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading your games...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Room Modal -->
+    <div class="modal" id="createRoomModal">
+        <div class="modal-content">
+            <div class="modal-header">Create New Game</div>
+            <div class="form-group">
+                <label>Game Name:</label>
+                <input type="text" id="room-name" placeholder="Sunday Night Game" required>
+            </div>
+            <div class="form-group">
+                <label>Max Players (2-8):</label>
+                <input type="number" id="max-players" min="2" max="8" value="4">
+            </div>
+            <div class="form-group">
+                <label>Your Player Name:</label>
+                <input type="text" id="host-player-name" placeholder="Your in-game name" required>
+            </div>
+            <div style="text-align: center;">
+                <button class="btn btn-success" onclick="createRoom()">Create Game</button>
+                <button class="btn btn-secondary" onclick="closeModal('createRoomModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Join Room Modal -->
+    <div class="modal" id="joinRoomModal">
+        <div class="modal-content">
+            <div class="modal-header">Join Game</div>
+            <div class="form-group">
+                <label>Invite Code:</label>
+                <input type="text" id="invite-code" placeholder="ABCD1234" style="text-transform: uppercase;" required>
+            </div>
+            <div class="form-group">
+                <label>Your Player Name:</label>
+                <input type="text" id="join-player-name" placeholder="Your in-game name" required>
+            </div>
+            <div id="join-error" class="error-message"></div>
+            <div style="text-align: center;">
+                <button class="btn btn-success" onclick="joinRoom()">Join Game</button>
+                <button class="btn btn-secondary" onclick="closeModal('joinRoomModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="src/js/config.js"></script>
+    <script src="src/js/supabase.js"></script>
+    <script src="src/js/lobby.js"></script>
+</body>
+</html>
