@@ -15,7 +15,7 @@ async function requireAuth() {
     const { data: { session } } = await supabase.auth.getSession();
 
     if (!session) {
-        window.location.href = 'auth.html';
+        window.location.href = 'landing.html';
         return null;
     }
 
@@ -34,7 +34,7 @@ async function handleLogout() {
         const { error } = await supabase.auth.signOut();
         if (error) throw error;
 
-        window.location.href = 'auth.html';
+        window.location.href = 'landing.html';
     } catch (error) {
         console.error('Logout error:', error);
         alert('Error logging out: ' + error.message);
@@ -283,6 +283,39 @@ async function logGameEvent(gameId, playerId, eventType, eventData) {
         console.error('Error logging game event:', error);
         return false;
     }
+}
+
+// Call the send-room-code Edge Function (best-effort, non-blocking)
+async function callSendRoomCode(payload) {
+    try {
+        await fetch(`${SUPABASE_URL}/functions/v1/send-room-code`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+    } catch (err) {
+        console.warn('send-room-code edge function error:', err);
+    }
+}
+
+// Shared utilities
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatTimeAgo(dateString) {
+    const date = new Date(dateString);
+    const now = new Date();
+    const seconds = Math.floor((now - date) / 1000);
+
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+    return date.toLocaleDateString();
 }
 
 // Subscribe to room updates

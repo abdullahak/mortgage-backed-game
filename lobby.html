@@ -23,7 +23,6 @@
 
                 <div class="lobby-actions">
                     <button class="btn btn-primary" onclick="showCreateRoomModal()">Create New Game</button>
-                    <button class="btn" onclick="showJoinRoomModal()">Join Game with Code</button>
                 </div>
 
                 <div class="rooms-section">
@@ -58,26 +57,6 @@
             <div style="text-align: center;">
                 <button class="btn btn-success" onclick="createRoom()">Create Game</button>
                 <button class="btn btn-secondary" onclick="closeModal('createRoomModal')">Cancel</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Join Room Modal -->
-    <div class="modal" id="joinRoomModal">
-        <div class="modal-content">
-            <div class="modal-header">Join Game</div>
-            <div class="form-group">
-                <label>Invite Code:</label>
-                <input type="text" id="invite-code" placeholder="ABCD1234" style="text-transform: uppercase;" required>
-            </div>
-            <div class="form-group">
-                <label>Your Player Name:</label>
-                <input type="text" id="join-player-name" placeholder="Your in-game name" required>
-            </div>
-            <div id="join-error" class="error-message"></div>
-            <div style="text-align: center;">
-                <button class="btn btn-success" onclick="joinRoom()">Join Game</button>
-                <button class="btn btn-secondary" onclick="closeModal('joinRoomModal')">Cancel</button>
             </div>
         </div>
     </div>

@@ -14,7 +14,7 @@
                 <h1>Mortgage Backed Monopoly</h1>
             </div>
             <div class="nav-links">
-                <a href="auth.html" class="btn-nav">Sign In / Sign Up</a>
+                <a href="auth.html" class="btn-nav">Create New Game</a>
             </div>
         </div>
     </nav>
@@ -30,9 +30,43 @@
                     IPO your properties, issue mortgage-backed securities, and build
                     your real estate empire with Wall Street tactics.
                 </p>
+
                 <div class="hero-cta">
-                    <a href="auth.html" class="btn btn-primary btn-large">Play Now - Free</a>
-                    <a href="#features" class="btn btn-secondary btn-large">Learn More</a>
+                    <a href="auth.html" class="btn btn-primary btn-large">Create New Game</a>
+                    <a href="#resume" class="btn btn-secondary btn-large">Resume Existing Game</a>
+                </div>
+
+                <!-- Resume form (inline) -->
+                <div id="resume" class="resume-form-card" style="margin-top: 32px; background: rgba(255,255,255,0.1); padding: 24px; border-radius: 12px; max-width: 400px;">
+                    <h3 style="margin: 0 0 12px; color: #fff;">Resume Existing Game</h3>
+                    <p style="margin: 0 0 16px; font-size: 0.9em; color: rgba(255,255,255,0.8);">
+                        Have a room code? Enter it to jump back in — no login needed.
+                    </p>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <input type="text" id="resume-code" placeholder="ABCD12"
+                            maxlength="6"
+                            style="flex:1; padding: 12px 14px; font-size: 1.1em; letter-spacing: 0.15em; text-transform: uppercase; border: none; border-radius: 8px; font-weight: 600;">
+                        <button class="btn btn-primary" onclick="resumeWithCode()" style="white-space: nowrap;">Join Game</button>
+                    </div>
+                    <div id="resume-error" style="color: #ff6b6b; font-size: 0.85em; margin-top: 8px; display: none;"></div>
+                    <p style="margin: 12px 0 0; font-size: 0.85em; color: rgba(255,255,255,0.7);">
+                        <a href="#" onclick="showForgotCode(event)" style="color: rgba(255,255,255,0.9);">Forgot your code?</a>
+                    </p>
+
+                    <!-- Forgot code subform -->
+                    <div id="forgot-code-form" style="display: none; margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 16px;">
+                        <p style="margin: 0 0 10px; font-size: 0.9em; color: rgba(255,255,255,0.9);">
+                            Enter your email and we'll resend all your room codes.
+                        </p>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="email" id="forgot-email" placeholder="your@email.com"
+                                style="flex:1; padding: 10px 12px; border: none; border-radius: 8px;">
+                            <button class="btn btn-primary" onclick="sendForgotCode()" style="white-space: nowrap;">Send Codes</button>
+                        </div>
+                        <div id="forgot-success" style="color: #a8e6a3; font-size: 0.85em; margin-top: 8px; display: none;">
+                            Check your email for your room codes!
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="hero-visual">
@@ -105,20 +139,20 @@
             <div class="steps">
                 <div class="step">
                     <div class="step-number">1</div>
-                    <h3>Create a Room</h3>
-                    <p>Sign up and start a new game with custom settings</p>
+                    <h3>Enter Your Email</h3>
+                    <p>Click "Create New Game" — we'll send a magic link. No password needed.</p>
                 </div>
                 <div class="step-arrow">→</div>
                 <div class="step">
                     <div class="step-number">2</div>
-                    <h3>Invite Friends</h3>
-                    <p>Share your unique room code with up to 7 friends</p>
+                    <h3>Set Up Your Room</h3>
+                    <p>Name your game, pick max players, and choose your nickname</p>
                 </div>
                 <div class="step-arrow">→</div>
                 <div class="step">
                     <div class="step-number">3</div>
-                    <h3>Build Your Empire</h3>
-                    <p>Buy properties, create IPOs, issue debt, and dominate</p>
+                    <h3>Share Room Code</h3>
+                    <p>Friends join with the 6-character code — no account required</p>
                 </div>
                 <div class="step-arrow">→</div>
                 <div class="step">
@@ -135,7 +169,10 @@
         <div class="cta-container">
             <h2>Ready to Play Wall Street Monopoly?</h2>
             <p>Free to play. No downloads. Just financial chaos with friends.</p>
-            <a href="auth.html" class="btn btn-primary btn-xl">Start Playing Now</a>
+            <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin-top: 8px;">
+                <a href="auth.html" class="btn btn-primary btn-xl">Create New Game</a>
+                <a href="#resume" class="btn btn-secondary btn-xl">Resume Existing Game</a>
+            </div>
         </div>
     </section>
 
@@ -153,7 +190,7 @@
                 <div class="footer-section">
                     <h4>Game</h4>
                     <ul class="footer-links">
-                        <li><a href="auth.html">Play Now</a></li>
+                        <li><a href="auth.html">Create New Game</a></li>
                         <li><a href="#features">Features</a></li>
                         <li><a href="#how-it-works">How to Play</a></li>
                     </ul>
@@ -171,5 +208,47 @@
             </div>
         </div>
     </footer>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="src/js/config.js"></script>
+    <script>
+        function resumeWithCode() {
+            const code = document.getElementById('resume-code').value.trim().toUpperCase();
+            const errorEl = document.getElementById('resume-error');
+
+            if (!code || code.length < 4) {
+                errorEl.textContent = 'Please enter a valid room code.';
+                errorEl.style.display = 'block';
+                return;
+            }
+
+            errorEl.style.display = 'none';
+            window.location.href = `waiting.html?code=${encodeURIComponent(code)}`;
+        }
+
+        function showForgotCode(e) {
+            e.preventDefault();
+            document.getElementById('forgot-code-form').style.display = 'block';
+        }
+
+        async function sendForgotCode() {
+            const email = document.getElementById('forgot-email').value.trim();
+            const successEl = document.getElementById('forgot-success');
+
+            if (!email) return;
+
+            await callSendRoomCode({ action: 'forgot_code', email });
+            successEl.style.display = 'block';
+        }
+
+        // Allow Enter key in resume code box
+        document.addEventListener('DOMContentLoaded', () => {
+            const codeInput = document.getElementById('resume-code');
+            if (codeInput) {
+                codeInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') resumeWithCode();
+                });
+            }
+        });
+    </script>
 </body>
 </html>

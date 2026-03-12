@@ -1,157 +1,70 @@
-// Authentication functions
+// Authentication — magic link only (no password)
 
-// Show auth tab
-function showAuthTab(tabName) {
-    // Hide all forms
-    document.querySelectorAll('.auth-form').forEach(form => {
-        form.classList.remove('active');
-    });
+async function handleMagicLink() {
+    const email = document.getElementById('magic-link-email').value.trim();
+    const errorEl = document.getElementById('magic-link-error');
 
-    // Remove active class from all tabs
-    document.querySelectorAll('.auth-tab').forEach(tab => {
-        tab.classList.remove('active');
-    });
-
-    // Show selected form and tab
-    document.getElementById(`${tabName}-form`).classList.add('active');
-    event.target.classList.add('active');
-
-    // Clear error messages
-    document.getElementById('login-error').classList.remove('active');
-    document.getElementById('signup-error').classList.remove('active');
-}
-
-// Handle login
-async function handleLogin() {
-    const email = document.getElementById('login-email').value.trim();
-    const password = document.getElementById('login-password').value;
-    const errorEl = document.getElementById('login-error');
-
-    if (!email || !password) {
-        errorEl.textContent = 'Please enter both email and password';
+    if (!email) {
+        errorEl.textContent = 'Please enter your email address';
         errorEl.classList.add('active');
         return;
     }
+
+    const btn = document.getElementById('send-magic-link-btn');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    errorEl.classList.remove('active');
 
     try {
-        const { data, error } = await supabase.auth.signInWithPassword({
+        const { error } = await supabase.auth.signInWithOtp({
             email,
-            password
-        });
-
-        if (error) throw error;
-
-        // Redirect to lobby
-        window.location.href = 'lobby.html';
-    } catch (error) {
-        errorEl.textContent = error.message || 'Login failed';
-        errorEl.classList.add('active');
-        console.error('Login error:', error);
-    }
-}
-
-// Handle signup
-async function handleSignup() {
-    const name = document.getElementById('signup-name').value.trim();
-    const email = document.getElementById('signup-email').value.trim();
-    const password = document.getElementById('signup-password').value;
-    const errorEl = document.getElementById('signup-error');
-
-    if (!name || !email || !password) {
-        errorEl.textContent = 'Please fill in all fields';
-        errorEl.classList.add('active');
-        return;
-    }
-
-    if (password.length < 6) {
-        errorEl.textContent = 'Password must be at least 6 characters';
-        errorEl.classList.add('active');
-        return;
-    }
-
-    try {
-        const { data, error } = await supabase.auth.signUp({
-            email,
-            password,
             options: {
-                data: {
-                    display_name: name
-                }
+                emailRedirectTo: window.location.origin + '/lobby.html'
             }
         });
 
         if (error) throw error;
 
-        // Check if email confirmation is required
-        if (data.user && !data.session) {
-            alert('Please check your email to confirm your account!');
-        } else {
-            // Redirect to lobby
-            window.location.href = 'lobby.html';
-        }
+        // Show success state
+        document.getElementById('magic-link-form').style.display = 'none';
+        document.getElementById('magic-link-sent').style.display = 'block';
+        document.getElementById('sent-to-email').textContent = email;
+
     } catch (error) {
-        errorEl.textContent = error.message || 'Signup failed';
+        errorEl.textContent = error.message || 'Failed to send magic link. Please try again.';
         errorEl.classList.add('active');
-        console.error('Signup error:', error);
+        btn.disabled = false;
+        btn.textContent = 'Send Magic Link';
+        console.error('Magic link error:', error);
     }
 }
 
-// Handle password reset
-async function handlePasswordReset() {
-    const email = prompt('Enter your email address:');
+function resetForm() {
+    document.getElementById('magic-link-form').style.display = 'block';
+    document.getElementById('magic-link-sent').style.display = 'none';
+    document.getElementById('magic-link-email').value = '';
 
-    if (!email) return;
-
-    try {
-        const { error } = await supabase.auth.resetPasswordForEmail(email, {
-            redirectTo: window.location.origin + '/auth.html'
-        });
-
-        if (error) throw error;
-
-        alert('Password reset email sent! Please check your inbox.');
-    } catch (error) {
-        alert('Error: ' + error.message);
-        console.error('Password reset error:', error);
-    }
+    const btn = document.getElementById('send-magic-link-btn');
+    btn.disabled = false;
+    btn.textContent = 'Send Magic Link';
 }
 
-// Check if user is already logged in
+// If user is already authenticated, go straight to lobby
 async function checkAuth() {
     const { data: { session } } = await supabase.auth.getSession();
-
-    if (session) {
-        // User is logged in, redirect to lobby
+    if (session && !session.user.is_anonymous) {
         window.location.href = 'lobby.html';
     }
 }
 
-// Run auth check on page load
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', checkAuth);
-} else {
-    checkAuth();
-}
-
-// Handle Enter key on forms
+// Handle Enter key
 document.addEventListener('DOMContentLoaded', () => {
-    // Login form
-    ['login-email', 'login-password'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-            el.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') handleLogin();
-            });
-        }
-    });
+    const emailInput = document.getElementById('magic-link-email');
+    if (emailInput) {
+        emailInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleMagicLink();
+        });
+    }
 
-    // Signup form
-    ['signup-name', 'signup-email', 'signup-password'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-            el.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') handleSignup();
-            });
-        }
-    });
+    checkAuth();
 });

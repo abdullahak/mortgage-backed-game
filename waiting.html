@@ -17,7 +17,30 @@
             </div>
         </div>
 
-        <div class="content">
+        <!-- Guest join form (shown when arriving via room code without auth) -->
+        <div class="content" id="guest-join-section" style="display: none;">
+            <div class="auth-container">
+                <h2>Join Game</h2>
+                <p style="color: #7f8c8d; margin-bottom: 20px;">
+                    Enter your name to join the room.
+                </p>
+                <div class="form-group">
+                    <label>Room Code:</label>
+                    <input type="text" id="guest-room-code" style="text-transform: uppercase; letter-spacing: 0.15em; font-weight: 600;" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Your Player Name:</label>
+                    <input type="text" id="guest-player-name" placeholder="Enter your name" required>
+                </div>
+                <div id="guest-join-error" class="error-message"></div>
+                <button id="guest-join-btn" class="btn btn-primary" onclick="joinAsGuest()">Join Game</button>
+                <p style="margin-top: 16px; text-align: center;">
+                    <a href="landing.html" style="color: #7f8c8d; font-size: 0.9em;">Back to home</a>
+                </p>
+            </div>
+        </div>
+
+        <div class="content" id="waiting-room-section">
             <div class="waiting-room-container">
                 <!-- Room Info Header -->
                 <div class="room-header-info">
@@ -56,6 +79,17 @@
                             Need at least 2 players to start
                         </p>
                     </div>
+
+                    <!-- Invite Friends by Email -->
+                    <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid #ecf0f1;">
+                        <h4 style="margin-bottom: 12px;">Invite Friends by Email</h4>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <input type="email" id="invite-email" placeholder="friend@email.com"
+                                style="flex: 1; min-width: 200px; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px;">
+                            <button class="btn btn-secondary" onclick="sendInviteEmail()">Send Invite</button>
+                        </div>
+                        <div id="invite-status" style="margin-top: 8px; font-size: 0.85em; color: #7f8c8d;"></div>
+                    </div>
                 </div>
 
                 <!-- Game Log -->
@@ -67,11 +101,13 @@
                 </div>
             </div>
         </div>
+        </div><!-- end waiting-room-section -->
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="src/js/config.js"></script>
     <script src="src/js/supabase.js"></script>
+    <script src="src/js/board.js"></script>
     <script src="src/js/waiting.js"></script>
 </body>
 </html>

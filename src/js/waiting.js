@@ -5,79 +5,148 @@ let currentUser = null;
 let roomChannel = null;
 let isHost = false;
 
-// Get room ID from URL
+// Get params from URL
 const urlParams = new URLSearchParams(window.location.search);
 const roomId = urlParams.get('room');
+const roomCode = urlParams.get('code'); // unauthenticated join path
 
 // Initialize waiting room
 async function initWaitingRoom() {
-    // Check authentication
+    if (roomCode) {
+        // Guest join path: show name form, sign in anonymously after submission
+        showGuestJoinSection();
+        return;
+    }
+
+    if (!roomId) {
+        alert('No room ID provided');
+        window.location.href = 'landing.html';
+        return;
+    }
+
+    // Authenticated path (host or returning member)
     const session = await requireAuth();
     if (!session) return;
 
     currentUser = await getCurrentUser();
-    document.getElementById('user-email').textContent = currentUser.email;
-
-    if (!roomId) {
-        alert('No room ID provided');
-        window.location.href = 'lobby.html';
-        return;
+    const emailDisplay = document.getElementById('user-email');
+    if (emailDisplay) {
+        emailDisplay.textContent = currentUser.email || 'Guest';
     }
 
-    // Load room data
     await loadRoomData();
-
-    // Subscribe to real-time updates
     subscribeToRoomUpdates();
-
-    // Check if game has already started
     checkGameStatus();
 }
 
-// Load room data
-async function loadRoomData() {
+// Show guest join UI
+function showGuestJoinSection() {
+    document.getElementById('waiting-room-section').style.display = 'none';
+    document.getElementById('guest-join-section').style.display = 'block';
+
+    const codeInput = document.getElementById('guest-room-code');
+    if (codeInput) codeInput.value = roomCode.toUpperCase();
+
+    const nameInput = document.getElementById('guest-player-name');
+    if (nameInput) {
+        nameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') joinAsGuest();
+        });
+    }
+}
+
+// Guest joins with anonymous session
+async function joinAsGuest() {
+    const playerName = document.getElementById('guest-player-name').value.trim();
+    const errorEl = document.getElementById('guest-join-error');
+    const btn = document.getElementById('guest-join-btn');
+
+    if (!playerName) {
+        errorEl.textContent = 'Please enter your player name';
+        errorEl.classList.add('active');
+        return;
+    }
+
+    errorEl.classList.remove('active');
+    btn.disabled = true;
+    btn.textContent = 'Joining...';
+
     try {
-        const room = await getRoomById(roomId);
+        // Sign in anonymously so RLS policies work
+        const { error: anonError } = await supabase.auth.signInAnonymously();
+        if (anonError) throw anonError;
+
+        currentUser = await getCurrentUser();
+
+        // Join room by code
+        const room = await joinRoomByCode(roomCode, playerName);
         currentRoom = room;
 
-        // Update UI
+        // Switch to waiting room UI
+        document.getElementById('guest-join-section').style.display = 'none';
+        document.getElementById('waiting-room-section').style.display = 'block';
+
+        const emailDisplay = document.getElementById('user-email');
+        if (emailDisplay) emailDisplay.textContent = playerName;
+
+        // Use room.id going forward
+        history.replaceState(null, '', `waiting.html?room=${room.id}`);
+
+        await loadRoomDataById(room.id);
+        subscribeToRoomUpdatesById(room.id);
+        checkGameStatusById(room.id);
+
+    } catch (error) {
+        console.error('Error joining room:', error);
+        errorEl.textContent = error.message || 'Could not join room. Check your code and try again.';
+        errorEl.classList.add('active');
+        btn.disabled = false;
+        btn.textContent = 'Join Game';
+    }
+}
+
+// Load room data (uses module-level roomId)
+async function loadRoomData() {
+    await loadRoomDataById(roomId);
+}
+
+async function loadRoomDataById(id) {
+    try {
+        const room = await getRoomById(id);
+        currentRoom = room;
+
         document.getElementById('room-name').textContent = room.name;
         document.getElementById('invite-code').textContent = room.invite_code;
         document.getElementById('player-count').textContent =
             `${room.room_members.length}/${room.max_players} players`;
 
-        // Check if current user is host
-        isHost = room.host_id === currentUser.id;
+        isHost = currentUser && room.host_id === currentUser.id;
 
         if (isHost) {
             document.getElementById('host-controls').style.display = 'block';
         }
 
-        // Update status
         updateRoomStatus(room.status);
-
-        // Render players
         renderPlayers(room.room_members);
-
-        // Update start button state
         updateStartButtonState(room.room_members.length);
 
     } catch (error) {
         console.error('Error loading room:', error);
         alert('Error loading room: ' + error.message);
-        window.location.href = 'lobby.html';
+        window.location.href = 'landing.html';
     }
 }
 
 // Subscribe to real-time room updates
 function subscribeToRoomUpdates() {
-    roomChannel = subscribeToRoom(roomId, async (payload) => {
+    subscribeToRoomUpdatesById(roomId);
+}
+
+function subscribeToRoomUpdatesById(id) {
+    roomChannel = subscribeToRoom(id, async (payload) => {
         console.log('Room update:', payload);
+        await loadRoomDataById(id);
 
-        // Reload room data when changes occur
-        await loadRoomData();
-
-        // Log activity
         if (payload.eventType === 'INSERT') {
             logActivity('A new player joined the room');
         } else if (payload.eventType === 'DELETE') {
@@ -85,26 +154,23 @@ function subscribeToRoomUpdates() {
         }
     });
 
-    // Also subscribe to room status changes
     supabase
-        .channel(`room-status:${roomId}`)
+        .channel(`room-status:${id}`)
         .on(
             'postgres_changes',
             {
                 event: 'UPDATE',
                 schema: 'public',
                 table: 'rooms',
-                filter: `id=eq.${roomId}`
+                filter: `id=eq.${id}`
             },
             async (payload) => {
                 console.log('Room status update:', payload);
 
                 if (payload.new.status === 'in_progress') {
                     logActivity('Game is starting!');
-
-                    // Redirect to game page after short delay
                     setTimeout(() => {
-                        window.location.href = `game.html?room=${roomId}`;
+                        window.location.href = `game.html?room=${id}`;
                     }, 1500);
                 }
             }
@@ -117,11 +183,7 @@ function renderPlayers(members) {
     const container = document.getElementById('players-list');
 
     if (members.length === 0) {
-        container.innerHTML = `
-            <div class="loading">
-                <p>No players yet</p>
-            </div>
-        `;
+        container.innerHTML = `<div class="loading"><p>No players yet</p></div>`;
         return;
     }
 
@@ -131,7 +193,7 @@ function renderPlayers(members) {
                 <strong>${escapeHtml(member.player_name)}</strong>
                 ${member.user_id === currentRoom.host_id ?
                     '<span class="player-badge">Host</span>' : ''}
-                ${member.user_id === currentUser.id ?
+                ${currentUser && member.user_id === currentUser.id ?
                     '<span class="player-badge" style="background: #3498db;">You</span>' : ''}
             </div>
             <div style="color: #95a5a6; font-size: 0.9em;">
@@ -158,8 +220,7 @@ function updateRoomStatus(status) {
 // Update start button state
 function updateStartButtonState(playerCount) {
     const startBtn = document.getElementById('start-game-btn');
-
-    if (!isHost) return;
+    if (!isHost || !startBtn) return;
 
     if (playerCount < 2) {
         startBtn.disabled = true;
@@ -176,28 +237,20 @@ function copyInviteCode() {
     const btn = event.target;
     const originalText = btn.textContent;
 
-    // Try modern clipboard API first
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(code).then(() => {
-            // Visual feedback
             btn.textContent = 'Copied!';
             btn.style.background = 'linear-gradient(45deg, #2ecc71, #27ae60)';
-
             setTimeout(() => {
                 btn.textContent = originalText;
                 btn.style.background = '';
             }, 2000);
-        }).catch(err => {
-            console.error('Clipboard API failed:', err);
-            fallbackCopyToClipboard(code, btn, originalText);
-        });
+        }).catch(() => fallbackCopyToClipboard(code, btn, originalText));
     } else {
-        // Fallback for older browsers
         fallbackCopyToClipboard(code, btn, originalText);
     }
 }
 
-// Fallback copy method using textarea
 function fallbackCopyToClipboard(text, btn, originalText) {
     const textarea = document.createElement('textarea');
     textarea.value = text;
@@ -211,7 +264,6 @@ function fallbackCopyToClipboard(text, btn, originalText) {
         if (successful) {
             btn.textContent = 'Copied!';
             btn.style.background = 'linear-gradient(45deg, #2ecc71, #27ae60)';
-
             setTimeout(() => {
                 btn.textContent = originalText;
                 btn.style.background = '';
@@ -220,11 +272,33 @@ function fallbackCopyToClipboard(text, btn, originalText) {
             alert('Code: ' + text + '\n\nPlease copy manually.');
         }
     } catch (err) {
-        console.error('Fallback copy failed:', err);
         alert('Code: ' + text + '\n\nPlease copy manually.');
     } finally {
         document.body.removeChild(textarea);
     }
+}
+
+// Invite friend by email (host only)
+async function sendInviteEmail() {
+    const emailInput = document.getElementById('invite-email');
+    const email = emailInput.value.trim();
+    const statusEl = document.getElementById('invite-status');
+
+    if (!email || !currentRoom) return;
+
+    statusEl.textContent = 'Sending...';
+    statusEl.style.color = '';
+
+    await callSendRoomCode({
+        action: 'invite_friend',
+        email,
+        inviteCode: currentRoom.invite_code,
+        roomName: currentRoom.name
+    });
+
+    statusEl.textContent = `Invite sent to ${email}!`;
+    statusEl.style.color = '#27ae60';
+    emailInput.value = '';
 }
 
 // Start game (host only)
@@ -244,7 +318,6 @@ async function startGameFromLobby() {
         startBtn.disabled = true;
         startBtn.textContent = 'Starting game...';
 
-        // Create initial game state
         const initialGameState = {
             players: currentRoom.room_members.map(member => ({
                 userId: member.user_id,
@@ -252,14 +325,24 @@ async function startGameFromLobby() {
                 cash: 1500,
                 properties: [],
                 equities: [],
+                corporations: [],
                 debts: [],
                 interestOwed: 0,
                 netWorth: 1500,
-                bankrupt: false
+                bankrupt: false,
+                position: 0,
+                inJail: false,
+                jailTurns: 0,
+                hasGetOutOfJailCard: false,
+                doubleCount: 0,
+                diceRolled: false,
             })),
             currentPlayerIndex: 0,
-            properties: MONOPOLY_PROPERTIES.map(prop => ({
+            properties: MONOPOLY_PROPERTIES.map((prop, i) => ({
                 ...prop,
+                id: `prop-${i}`,
+                ownerId: null,
+                ownerName: null,
                 owner: null,
                 houses: 0,
                 available: true
@@ -269,17 +352,20 @@ async function startGameFromLobby() {
             settings: {
                 interestRate: 5,
                 passGoAmount: 200
-            }
+            },
+            chanceCards: shuffleDeck(CHANCE_CARDS),
+            communityChestCards: shuffleDeck(COMMUNITY_CHEST_CARDS),
+            lastDiceRoll: null,
+            lastCardDrawn: null,
         };
 
-        // Start the game (calls helper function from supabase.js)
-        const game = await startGame(roomId, initialGameState);
+        const activeRoomId = currentRoom.id;
+        const game = await startGame(activeRoomId, initialGameState);
 
         logActivity('Game started! Redirecting...');
 
-        // Redirect to game page
         setTimeout(() => {
-            window.location.href = `game.html?room=${roomId}`;
+            window.location.href = `game.html?room=${activeRoomId}`;
         }, 1000);
 
     } catch (error) {
@@ -294,27 +380,26 @@ async function startGameFromLobby() {
 
 // Leave room
 async function leaveRoom() {
-    if (!confirm('Are you sure you want to leave this room?')) {
-        return;
-    }
+    if (!confirm('Are you sure you want to leave this room?')) return;
 
     try {
-        // Remove user from room members
-        const { error } = await supabase
-            .from('room_members')
-            .delete()
-            .eq('room_id', roomId)
-            .eq('user_id', currentUser.id);
+        const activeRoomId = currentRoom ? currentRoom.id : roomId;
 
-        if (error) throw error;
+        if (currentUser) {
+            const { error } = await supabase
+                .from('room_members')
+                .delete()
+                .eq('room_id', activeRoomId)
+                .eq('user_id', currentUser.id);
 
-        // Unsubscribe from updates
+            if (error) throw error;
+        }
+
         if (roomChannel) {
             await unsubscribeChannel(roomChannel);
         }
 
-        // Redirect to lobby
-        window.location.href = 'lobby.html';
+        window.location.href = 'landing.html';
 
     } catch (error) {
         console.error('Error leaving room:', error);
@@ -324,12 +409,14 @@ async function leaveRoom() {
 
 // Check if game has already started
 async function checkGameStatus() {
-    try {
-        const game = await getGameByRoomId(roomId);
+    await checkGameStatusById(roomId);
+}
 
-        if (game && currentRoom.status === 'in_progress') {
-            // Game already started, redirect to game page
-            window.location.href = `game.html?room=${roomId}`;
+async function checkGameStatusById(id) {
+    try {
+        const game = await getGameByRoomId(id);
+        if (game && currentRoom && currentRoom.status === 'in_progress') {
+            window.location.href = `game.html?room=${id}`;
         }
     } catch (error) {
         console.error('Error checking game status:', error);
@@ -347,29 +434,12 @@ function logActivity(message) {
 
     logContainer.insertBefore(entry, logContainer.firstChild);
 
-    // Keep only last 10 entries
     while (logContainer.children.length > 10) {
         logContainer.removeChild(logContainer.lastChild);
     }
 }
 
-// Utility functions
-function formatTimeAgo(dateString) {
-    const date = new Date(dateString);
-    const now = new Date();
-    const seconds = Math.floor((now - date) / 1000);
-
-    if (seconds < 60) return 'just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    return `${Math.floor(seconds / 86400)}d ago`;
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// escapeHtml and formatTimeAgo are defined in supabase.js
 
 // Monopoly properties for initial game state
 const MONOPOLY_PROPERTIES = [
@@ -402,10 +472,10 @@ const MONOPOLY_PROPERTIES = [
     { name: "Boardwalk", color: "Dark Blue", price: 400, rent: [50, 200, 600, 1400, 1700, 2000] }
 ];
 
-// Cleanup on page unload
-window.addEventListener('beforeunload', async () => {
+// Cleanup on page unload (synchronous — browser won't wait for async)
+window.addEventListener('beforeunload', () => {
     if (roomChannel) {
-        await unsubscribeChannel(roomChannel);
+        unsubscribeChannel(roomChannel);
     }
 });
 
