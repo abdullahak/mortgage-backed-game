@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Waiting Room - Mortgage Backed Monopoly</title>
-    <link rel="stylesheet" href="src/css/style.css?v=2">
+    <link rel="stylesheet" href="src/css/style.css?v=4">
 </head>
 <body>
     <div class="container">
@@ -13,7 +13,7 @@
             <p><em>If they did it in 2008, it's fair game</em></p>
             <div class="user-info">
                 <span id="user-email"></span>
-                <button class="btn btn-secondary btn-sm" onclick="leaveRoom()">Leave Room</button>
+                <button id="leave-room-btn" class="btn btn-secondary btn-sm" onclick="leaveRoom()" style="display:none;">Leave Room</button>
             </div>
         </div>
 
@@ -35,7 +35,7 @@
                 <div id="guest-join-error" class="error-message"></div>
                 <button id="guest-join-btn" class="btn btn-primary" onclick="joinAsGuest()">Join Game</button>
                 <p style="margin-top: 16px; text-align: center;">
-                    <a href="landing.html" style="color: #7f8c8d; font-size: 0.9em;">Back to home</a>
+                    <a href="index.html" style="color: #7f8c8d; font-size: 0.9em;">Back to home</a>
                 </p>
             </div>
         </div>
@@ -75,7 +75,7 @@
                         <button class="btn btn-success btn-large" onclick="startGameFromLobby()" id="start-game-btn">
                             Start Game
                         </button>
-                        <p style="margin-top: 10px; color: #7f8c8d;">
+                        <p id="start-help-text" style="margin-top: 10px; color: #7f8c8d;">
                             Need at least 2 players to start
                         </p>
                     </div>
@@ -105,9 +105,9 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="src/js/config.js?v=3"></script>
-    <script src="src/js/supabase.js?v=3"></script>
-    <script src="src/js/board.js?v=3"></script>
-    <script src="src/js/waiting.js?v=3"></script>
+    <script src="src/js/config.js?v=4"></script>
+    <script src="src/js/supabase.js?v=4"></script>
+    <script src="src/js/board.js?v=4"></script>
+    <script src="src/js/waiting.js?v=4"></script>
 </body>
 </html>

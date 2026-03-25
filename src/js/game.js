@@ -38,12 +38,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     } catch (error) {
         console.error('Error initializing game:', error);
-        console.error('Error details:', {
-            message: error.message,
-            stack: error.stack,
-            roomId: new URLSearchParams(window.location.search).get('room')
-        });
-        alert('Failed to load game: ' + error.message + '\n\nCheck browser console for details.');
+        const gameContent = document.getElementById('gameContent');
+        if (gameContent) {
+            gameContent.innerHTML = `
+                <div style="text-align:center;padding:40px 20px;">
+                    <p style="color:#e74c3c;font-size:1.1rem;margin-bottom:16px;">
+                        Failed to load game: ${escapeHtml(error.message)}
+                    </p>
+                    <a href="lobby.html" class="btn btn-secondary">Back to Lobby</a>
+                </div>`;
+        }
     }
 });
 
@@ -110,11 +114,11 @@ function setupRealtimeSubscriptions() {
         // Reload game log
         await loadGameLog();
 
-        // Re-render board if that tab is currently visible
-        if (document.getElementById('board') &&
-            document.getElementById('board').classList.contains('active')) {
-            renderBoardTab();
-        }
+        // Always re-render board so it stays in sync regardless of active tab
+        renderBoardTab();
+
+        // Refresh transaction dropdowns with latest player/property state
+        populatePlayerDropdowns();
     });
 }
 
@@ -494,11 +498,17 @@ async function createIPO() {
 
         gameState.corporations.push(corporation);
 
-        // Remove assets from player's properties
+        // Remove assets from player's properties and clear ownership in master list
         selectedAssets.forEach(asset => {
             const index = currentPlayerData.properties.findIndex(p => p.id === asset.id);
             if (index !== -1) {
                 currentPlayerData.properties.splice(index, 1);
+            }
+            // Clear ownerId so the board/rent logic no longer treats this as player-owned
+            const masterProp = gameState.properties.find(p => p.id === asset.id);
+            if (masterProp) {
+                masterProp.ownerId = corporation.id;
+                masterProp.ownerName = `[${ticker}]`;
             }
         });
 
@@ -1551,6 +1561,11 @@ async function confirmHousePurchase() {
         myPlayer.cash -= totalCost;
         changes.forEach(({ prop, delta }) => {
             prop.houses = Math.min(5, (prop.houses || 0) + delta);
+            // Sync value in player.properties so net worth stays accurate
+            const playerPropEntry = myPlayer.properties.find(p => p.id === prop.id);
+            if (playerPropEntry) {
+                playerPropEntry.value = prop.price + prop.houses * (HOUSE_COSTS[prop.color] || 0);
+            }
         });
 
         gameState.gameLog.push({

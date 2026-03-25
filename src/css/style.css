@@ -600,6 +600,11 @@ body {
     color: #7f8c8d;
 }
 
+.room-status.room_full {
+    background: rgba(231, 76, 60, 0.15);
+    color: #e74c3c;
+}
+
 .room-info {
     display: flex;
     gap: 20px;

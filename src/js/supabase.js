@@ -40,7 +40,7 @@ function getSocket() {
 async function requireAuth() {
     const token = localStorage.getItem('auth_token');
     if (!token) {
-        window.location.href = 'landing.html';
+        window.location.href = 'index.html';
         return null;
     }
     try {
@@ -48,7 +48,7 @@ async function requireAuth() {
         return user;
     } catch {
         localStorage.removeItem('auth_token');
-        window.location.href = 'landing.html';
+        window.location.href = 'index.html';
         return null;
     }
 }
@@ -68,7 +68,7 @@ async function handleLogout() {
         await apiFetch('/auth/signout', { method: 'POST' });
     } catch {}
     localStorage.removeItem('auth_token');
-    window.location.href = 'landing.html';
+    window.location.href = 'index.html';
 }
 
 // ----------------------------------------------------------------

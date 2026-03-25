@@ -20,7 +20,7 @@ async function initWaitingRoom() {
 
     if (!roomId) {
         alert('No room ID provided');
-        window.location.href = 'landing.html';
+        window.location.href = 'index.html';
         return;
     }
 
@@ -43,6 +43,8 @@ async function initWaitingRoom() {
 function showGuestJoinSection() {
     document.getElementById('waiting-room-section').style.display = 'none';
     document.getElementById('guest-join-section').style.display = 'block';
+    const leaveBtn = document.getElementById('leave-room-btn');
+    if (leaveBtn) leaveBtn.style.display = 'none';
 
     const codeInput = document.getElementById('guest-room-code');
     if (codeInput) codeInput.value = roomCode.toUpperCase();
@@ -84,6 +86,8 @@ async function joinAsGuest() {
         // Switch to waiting room UI
         document.getElementById('guest-join-section').style.display = 'none';
         document.getElementById('waiting-room-section').style.display = 'block';
+        const leaveBtn = document.getElementById('leave-room-btn');
+        if (leaveBtn) leaveBtn.style.display = '';
 
         const emailDisplay = document.getElementById('user-email');
         if (emailDisplay) emailDisplay.textContent = playerName;
@@ -125,14 +129,17 @@ async function loadRoomDataById(id) {
             document.getElementById('host-controls').style.display = 'block';
         }
 
-        updateRoomStatus(room.status);
+        updateRoomStatus(room.status, room.room_members.length, room.max_players);
         renderPlayers(room.room_members);
         updateStartButtonState(room.room_members.length);
+
+        const leaveBtn = document.getElementById('leave-room-btn');
+        if (leaveBtn) leaveBtn.style.display = '';
 
     } catch (error) {
         console.error('Error loading room:', error);
         alert('Error loading room: ' + error.message);
-        window.location.href = 'landing.html';
+        window.location.href = 'index.html';
     }
 }
 
@@ -157,7 +164,7 @@ function subscribeToRoomUpdatesById(id) {
         // onStatusChange
         async (room) => {
             console.log('Room status update:', room);
-            updateRoomStatus(room.status);
+            updateRoomStatus(room.status, room.room_members ? room.room_members.length : undefined, room.max_players);
             if (room.status === 'in_progress') {
                 logActivity('Game is starting!');
                 setTimeout(() => {
@@ -194,17 +201,21 @@ function renderPlayers(members) {
 }
 
 // Update room status display
-function updateRoomStatus(status) {
+function updateRoomStatus(status, playerCount, maxPlayers) {
     const statusEl = document.getElementById('room-status');
-    statusEl.className = `room-status ${status}`;
 
-    const statusText = {
-        'waiting': 'Waiting for players',
-        'in_progress': 'Game in progress',
-        'completed': 'Game completed'
-    };
-
-    statusEl.textContent = statusText[status] || status;
+    if (status === 'waiting' && maxPlayers && playerCount >= maxPlayers) {
+        statusEl.className = 'room-status room_full';
+        statusEl.textContent = 'Room Full';
+    } else {
+        statusEl.className = `room-status ${status}`;
+        const statusText = {
+            'waiting': 'Waiting for players',
+            'in_progress': 'Game in progress',
+            'completed': 'Game completed'
+        };
+        statusEl.textContent = statusText[status] || status;
+    }
 }
 
 // Update start button state
@@ -212,12 +223,16 @@ function updateStartButtonState(playerCount) {
     const startBtn = document.getElementById('start-game-btn');
     if (!isHost || !startBtn) return;
 
+    const helpText = document.getElementById('start-help-text');
+
     if (playerCount < 2) {
         startBtn.disabled = true;
         startBtn.textContent = 'Need at least 2 players';
+        if (helpText) helpText.style.display = '';
     } else {
         startBtn.disabled = false;
         startBtn.textContent = `Start Game (${playerCount} players)`;
+        if (helpText) helpText.style.display = 'none';
     }
 }
 
@@ -379,7 +394,7 @@ async function leaveRoom() {
             roomSubscription.unsubscribe();
         }
 
-        window.location.href = 'landing.html';
+        window.location.href = 'index.html';
 
     } catch (error) {
         console.error('Error leaving room:', error);
