@@ -1,0 +1,32 @@
+// Shared game data — safe to include in any page (no DOM side effects)
+
+const MONOPOLY_PROPERTIES = [
+    { name: "Mediterranean Avenue", color: "Brown", price: 60, rent: [2, 10, 30, 90, 160, 250] },
+    { name: "Baltic Avenue", color: "Brown", price: 60, rent: [4, 20, 60, 180, 320, 450] },
+    { name: "Oriental Avenue", color: "Light Blue", price: 100, rent: [6, 30, 90, 270, 400, 550] },
+    { name: "Vermont Avenue", color: "Light Blue", price: 100, rent: [6, 30, 90, 270, 400, 550] },
+    { name: "Connecticut Avenue", color: "Light Blue", price: 120, rent: [8, 40, 100, 300, 450, 600] },
+    { name: "St. Charles Place", color: "Pink", price: 140, rent: [10, 50, 150, 450, 625, 750] },
+    { name: "Electric Company", color: "Utility", price: 150, rent: [4, 10] },
+    { name: "States Avenue", color: "Pink", price: 140, rent: [10, 50, 150, 450, 625, 750] },
+    { name: "Virginia Avenue", color: "Pink", price: 160, rent: [12, 60, 180, 500, 700, 900] },
+    { name: "Reading Railroad", color: "Railroad", price: 200, rent: [25, 50, 100, 200] },
+    { name: "St. James Place", color: "Orange", price: 180, rent: [14, 70, 200, 550, 750, 950] },
+    { name: "Tennessee Avenue", color: "Orange", price: 180, rent: [14, 70, 200, 550, 750, 950] },
+    { name: "New York Avenue", color: "Orange", price: 200, rent: [16, 80, 220, 600, 800, 1000] },
+    { name: "Kentucky Avenue", color: "Red", price: 220, rent: [18, 90, 250, 700, 875, 1050] },
+    { name: "Indiana Avenue", color: "Red", price: 220, rent: [18, 90, 250, 700, 875, 1050] },
+    { name: "Illinois Avenue", color: "Red", price: 240, rent: [20, 100, 300, 750, 925, 1100] },
+    { name: "Pennsylvania Railroad", color: "Railroad", price: 200, rent: [25, 50, 100, 200] },
+    { name: "Atlantic Avenue", color: "Yellow", price: 260, rent: [22, 110, 330, 800, 975, 1150] },
+    { name: "Ventnor Avenue", color: "Yellow", price: 260, rent: [22, 110, 330, 800, 975, 1150] },
+    { name: "Water Works", color: "Utility", price: 150, rent: [4, 10] },
+    { name: "Marvin Gardens", color: "Yellow", price: 280, rent: [24, 120, 360, 850, 1025, 1200] },
+    { name: "Pacific Avenue", color: "Green", price: 300, rent: [26, 130, 390, 900, 1100, 1275] },
+    { name: "North Carolina Avenue", color: "Green", price: 300, rent: [26, 130, 390, 900, 1100, 1275] },
+    { name: "Pennsylvania Avenue", color: "Green", price: 320, rent: [28, 150, 450, 1000, 1200, 1400] },
+    { name: "Short Line", color: "Railroad", price: 200, rent: [25, 50, 100, 200] },
+    { name: "Park Place", color: "Dark Blue", price: 350, rent: [35, 175, 500, 1100, 1300, 1500] },
+    { name: "Boardwalk", color: "Dark Blue", price: 400, rent: [50, 200, 600, 1400, 1700, 2000] },
+    { name: "B. & O. Railroad", color: "Railroad", price: 200, rent: [25, 50, 100, 200] }
+];

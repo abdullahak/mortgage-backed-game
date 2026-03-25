@@ -253,6 +253,22 @@
         </div>
     </div>
 
+    <!-- Hotseat interstitial overlay — shown between turns in local play -->
+    <div id="hotseat-interstitial" style="display:none;">
+        <div class="hotseat-inner">
+            <div class="hotseat-icon">🤝</div>
+            <h2 class="hotseat-title">Pass the Device</h2>
+            <p class="hotseat-subtitle">
+                Hand the device to<br>
+                <strong id="hotseat-next-player-name">—</strong>
+            </p>
+            <button class="hotseat-ready-btn" onclick="dismissHotseatInterstitial()">
+                I'm Ready →
+            </button>
+            <p class="hotseat-hint">The previous player's screen is hidden until you tap ready.</p>
+        </div>
+    </div>
+
     <script src="/socket.io/socket.io.js"></script>
     <script src="src/js/config.js?v=4"></script>
     <script src="src/js/supabase.js?v=4"></script>

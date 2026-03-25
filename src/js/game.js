@@ -6,10 +6,21 @@ let currentUser = null;
 let gameChannel = null;
 let currentPlayerData = null;
 
+// Hotseat mode (same-device local play)
+let isHotseatMode = false;
+let hotseatTokens = []; // [{userId, token, name}]
+
 // Initialize game on page load
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        // Get current user
+        // Detect hotseat mode from sessionStorage
+        const storedTokens = sessionStorage.getItem('hotseat_tokens');
+        if (storedTokens) {
+            isHotseatMode = true;
+            hotseatTokens = JSON.parse(storedTokens);
+        }
+
+        // Get current user (player 1's token is already in localStorage for hotseat)
         const user = await getCurrentUser();
         if (!user) {
             window.location.href = 'auth.html';
@@ -870,16 +881,54 @@ async function endTurn() {
             nextPlayer: nextPlayer.name
         });
 
-        // --- Win condition: only 1 non-bankrupt player remains ---
+        // --- Win condition ---
         const activePlayers = gameState.players.filter(p => !p.bankrupt);
-        if (activePlayers.length === 1) {
-            await triggerEndGame(gameState, activePlayers[0].name + ' wins — last player standing!');
+        if (activePlayers.length <= 1) {
+            if (isHotseatMode) sessionStorage.removeItem('hotseat_tokens');
+            const reason = activePlayers.length === 1
+                ? activePlayers[0].name + ' wins — last player standing!'
+                : 'Everyone went bankrupt — it\'s a draw!';
+            await triggerEndGame(gameState, reason);
+            return;
+        }
+
+        // --- Hotseat: show pass-device screen before next player takes over ---
+        if (isHotseatMode) {
+            showHotseatInterstitial(nextPlayer.name);
         }
 
     } catch (error) {
         console.error('Error ending turn:', error);
         alert('Failed to end turn');
     }
+}
+
+// ── Hotseat: pass-device interstitial ──────────────────────────────
+function showHotseatInterstitial(nextPlayerName) {
+    document.getElementById('hotseat-next-player-name').textContent = nextPlayerName;
+    document.getElementById('hotseat-interstitial').style.display = 'flex';
+}
+
+function dismissHotseatInterstitial() {
+    const gameState = currentGame.game_state;
+    const nextPlayer = gameState.players[gameState.currentPlayerIndex];
+
+    const record = hotseatTokens.find(t => t.userId === nextPlayer.userId);
+    if (!record) {
+        document.getElementById('hotseat-interstitial').style.display = 'none';
+        return;
+    }
+
+    // Swap active token — apiFetch() reads localStorage on every call
+    localStorage.setItem('auth_token', record.token);
+
+    // Update in-memory identity without an extra API round-trip
+    currentUser = { id: record.userId, email: null, is_anonymous: true };
+    currentPlayerData = gameState.players.find(p => p.userId === currentUser.id);
+
+    // Re-render from the new player's perspective
+    renderGameState(gameState);
+    document.getElementById('hotseat-interstitial').style.display = 'none';
 }
 
 // End Game - compute net worth and show winner screen
@@ -903,6 +952,9 @@ async function triggerEndGame(gameState, reason) {
         });
 
         await logGameEvent('game_ended', { reason, standings });
+
+        // Clear hotseat session on game over
+        if (isHotseatMode) sessionStorage.removeItem('hotseat_tokens');
 
         // Show winner modal
         const winner = standings[0];

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Play Locally — Mortgage Backed Monopoly</title>
+    <link rel="stylesheet" href="src/css/style.css?v=4">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Mortgage Backed Monopoly</h1>
+            <p><em>Play Locally — Pass the device between players</em></p>
+        </div>
+
+        <div class="content">
+            <div class="auth-container" style="max-width: 500px;">
+                <h2>Local Hotseat Game</h2>
+                <p style="color: #7f8c8d; margin-bottom: 24px;">
+                    Enter 2–6 player names. You'll take turns on the same device — a hand-off screen
+                    appears between turns so no one peeks at the other player's state.
+                </p>
+
+                <div id="player-name-fields">
+                    <div class="form-group">
+                        <label>Player 1</label>
+                        <input type="text" class="player-name-input" placeholder="Player 1 name" maxlength="20" autofocus>
+                    </div>
+                    <div class="form-group">
+                        <label>Player 2</label>
+                        <input type="text" class="player-name-input" placeholder="Player 2 name" maxlength="20">
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <button class="btn btn-secondary btn-sm" onclick="addPlayerField()" id="add-player-btn">
+                        + Add Player
+                    </button>
+                    <span style="color: #95a5a6; font-size: 0.85em; margin-left: 8px;">up to 6 players</span>
+                </div>
+
+                <div id="hotseat-error" class="error-message"></div>
+
+                <button class="btn btn-primary btn-large" onclick="startHotseatGame()" id="start-hotseat-btn"
+                        style="width: 100%; margin-bottom: 12px;">
+                    Start Local Game
+                </button>
+                <p style="text-align: center;">
+                    <a href="index.html" style="color: #7f8c8d; font-size: 0.9em;">Back to home</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="src/js/config.js?v=4"></script>
+    <script src="src/js/supabase.js?v=4"></script>
+    <script src="src/js/game-data.js?v=1"></script>
+    <script src="src/js/board.js?v=4"></script>
+    <script src="src/js/hotseat.js?v=1"></script>
+</body>
+</html>
