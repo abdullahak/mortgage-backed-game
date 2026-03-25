@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Waiting Room - Mortgage Backed Monopoly</title>
-    <link rel="stylesheet" href="src/css/style.css">
+    <link rel="stylesheet" href="src/css/style.css?v=2">
 </head>
 <body>
     <div class="container">
@@ -85,7 +85,7 @@
                         <h4 style="margin-bottom: 12px;">Invite Friends by Email</h4>
                         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                             <input type="email" id="invite-email" placeholder="friend@email.com"
-                                style="flex: 1; min-width: 200px; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px;">
+                                style="flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px;">
                             <button class="btn btn-secondary" onclick="sendInviteEmail()">Send Invite</button>
                         </div>
                         <div id="invite-status" style="margin-top: 8px; font-size: 0.85em; color: #7f8c8d;"></div>
@@ -104,10 +104,10 @@
         </div><!-- end waiting-room-section -->
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="src/js/config.js"></script>
-    <script src="src/js/supabase.js"></script>
-    <script src="src/js/board.js"></script>
-    <script src="src/js/waiting.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="src/js/config.js?v=3"></script>
+    <script src="src/js/supabase.js?v=3"></script>
+    <script src="src/js/board.js?v=3"></script>
+    <script src="src/js/waiting.js?v=3"></script>
 </body>
 </html>

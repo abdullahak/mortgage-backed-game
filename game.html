@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Game - Mortgage Backed Monopoly</title>
-    <link rel="stylesheet" href="src/css/style.css">
+    <link rel="stylesheet" href="src/css/style.css?v=3">
 </head>
 <body>
     <div class="container">
@@ -13,14 +13,20 @@
             <p><em>If they did it in 2008, it's fair game</em></p>
             <div class="user-info">
                 <span id="user-email"></span>
-                <span id="room-code" style="margin-left: 20px; font-family: monospace; background: rgba(102, 126, 234, 0.1); padding: 5px 10px; border-radius: 5px;"></span>
+                <span id="room-code" style="margin-left: 20px; font-family: monospace; background: rgba(64, 145, 108, 0.1); padding: 5px 10px; border-radius: 5px;"></span>
             </div>
         </div>
 
         <div class="nav-tabs">
-            <button class="nav-tab active" onclick="showSection('game')">Game</button>
-            <button class="nav-tab" onclick="showSection('market')">Market</button>
-            <button class="nav-tab" onclick="showSection('log')">Log</button>
+            <button class="nav-tab active" onclick="showSection(event, 'game')">Game</button>
+            <button class="nav-tab" onclick="showSection(event, 'market')">Market</button>
+            <button class="nav-tab" onclick="showSection(event, 'log')">Log</button>
+            <button class="nav-tab" onclick="showSection(event, 'board')">Board</button>
+        </div>
+
+        <div id="turn-banner">
+            <span>🎲 Your Turn!</span>
+            <button class="btn btn-success btn-sm" onclick="switchToGameTab()">Go to Actions</button>
         </div>
 
         <div class="content">
@@ -91,6 +97,11 @@
                         <p>Loading game history...</p>
                     </div>
                 </div>
+            </div>
+
+            <!-- Board Section -->
+            <div class="section" id="board">
+                <div id="boardContent"></div>
             </div>
         </div>
     </div>
@@ -188,9 +199,64 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="src/js/config.js"></script>
-    <script src="src/js/supabase.js"></script>
-    <script src="src/js/game.js"></script>
+    <!-- Card Draw Modal (Chance / Community Chest) -->
+    <div class="modal" id="cardModal">
+        <div class="modal-content">
+            <div class="modal-header" id="cardModalHeader">Card</div>
+            <div id="cardModalText" style="font-size:1.1rem;margin:16px 0;line-height:1.5;"></div>
+            <div id="cardModalEffect" style="color:#2D6A4F;font-style:italic;margin-bottom:16px;"></div>
+            <div style="text-align:center;">
+                <button class="btn btn-primary" onclick="closeModal('cardModal')">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rent / Tax Payment Modal -->
+    <div class="modal" id="rentModal">
+        <div class="modal-content" style="max-width:380px;">
+            <div class="modal-header">Payment Due</div>
+            <div id="rentModalMessage" style="margin-bottom:8px;"></div>
+            <div class="rent-amount" id="rentModalAmount"></div>
+            <div id="rentModalCashAfter" style="color:#888;font-size:0.9rem;text-align:center;margin-bottom:16px;"></div>
+            <div style="text-align:center;">
+                <button class="btn btn-danger" id="rentPayBtn" onclick="confirmRentPayment()">Pay</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- House Purchase Modal -->
+    <div class="modal" id="houseModal">
+        <div class="modal-content" style="max-width:480px;">
+            <div class="modal-header">Buy Houses / Hotel</div>
+            <p style="color:#888;font-size:0.85rem;margin-bottom:12px;">Select how many houses to add per property. Max 4 houses; a 5th replaces all with a hotel.</p>
+            <div id="houseModalProperties"></div>
+            <div id="houseModalTotal" style="font-weight:bold;margin:12px 0;"></div>
+            <div style="text-align:center;">
+                <button class="btn btn-success" onclick="confirmHousePurchase()">Confirm Purchase</button>
+                <button class="btn btn-secondary" onclick="closeModal('houseModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="winnerModal">
+        <div class="modal-content">
+            <div class="modal-header">Game Over!</div>
+            <div style="text-align: center; margin-bottom: 20px;">
+                <h2 id="winnerName" style="color: #2D6A4F; font-size: 2rem;"></h2>
+                <p id="winnerReason" style="color: #666;"></p>
+            </div>
+            <h3>Final Standings</h3>
+            <div id="finalStandings" style="margin: 15px 0;"></div>
+            <div style="text-align: center;">
+                <button class="btn btn-primary" onclick="window.location.href='lobby.html'">Back to Lobby</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="src/js/config.js?v=3"></script>
+    <script src="src/js/supabase.js?v=3"></script>
+    <script src="src/js/board.js?v=3"></script>
+    <script src="src/js/game.js?v=3"></script>
 </body>
 </html>

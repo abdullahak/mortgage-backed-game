@@ -3,15 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mortgage Backed Monopoly - Play Monopoly Like Wall Street</title>
-    <link rel="stylesheet" href="src/css/landing.css">
+    <title>Mortgage Backed Monopoly — Play Monopoly Like Wall Street</title>
+    <link rel="stylesheet" href="src/css/landing.css?v=4">
 </head>
 <body>
+
     <!-- Navigation -->
-    <nav class="nav">
+    <nav class="nav" id="main-nav">
         <div class="nav-container">
             <div class="nav-brand">
-                <h1>Mortgage Backed Monopoly</h1>
+                <span class="nav-brand-text">Mortgage Backed Monopoly</span>
             </div>
             <div class="nav-links">
                 <a href="auth.html" class="btn-nav">Create New Game</a>
@@ -21,10 +22,34 @@
 
     <!-- Hero Section -->
     <section class="hero">
+        <!-- Decorative stock chart SVG background -->
+        <svg class="hero-chart-bg" viewBox="0 0 700 300" fill="none"
+             xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <polyline
+                points="0,260 70,225 130,245 190,185 240,205 300,130
+                        360,155 400,90 460,115 520,65 580,82 640,35 700,52"
+                stroke="#C9A227" stroke-width="2" fill="none"
+                stroke-linecap="round" stroke-linejoin="round"/>
+            <polygon
+                points="0,260 70,225 130,245 190,185 240,205 300,130
+                        360,155 400,90 460,115 520,65 580,82 640,35 700,52 700,300 0,300"
+                fill="url(#heroChartGrad)"/>
+            <defs>
+                <linearGradient id="heroChartGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stop-color="#C9A227" stop-opacity="0.25"/>
+                    <stop offset="100%" stop-color="#C9A227" stop-opacity="0"/>
+                </linearGradient>
+            </defs>
+        </svg>
+
         <div class="hero-container">
             <div class="hero-content">
-                <h1 class="hero-title">Play Monopoly Like Wall Street</h1>
-                <p class="hero-subtitle">If they did it in 2008, it's fair game</p>
+                <p class="hero-eyebrow">Live · Wall Street Edition · 2008 Rules</p>
+                <h1 class="hero-title">
+                    Play Monopoly
+                    <span class="hero-title-accent">Like Wall Street</span>
+                </h1>
+                <p class="hero-subtitle">"If they did it in 2008, it's fair game"</p>
                 <p class="hero-description">
                     Transform classic Monopoly into a high-stakes financial game.
                     IPO your properties, issue mortgage-backed securities, and build
@@ -33,71 +58,103 @@
 
                 <div class="hero-cta">
                     <a href="auth.html" class="btn btn-primary btn-large">Create New Game</a>
-                    <a href="#resume" class="btn btn-secondary btn-large">Resume Existing Game</a>
+                    <a href="#resume" class="btn btn-ghost btn-large">Resume Existing Game</a>
                 </div>
 
-                <!-- Resume form (inline) -->
-                <div id="resume" class="resume-form-card" style="margin-top: 32px; background: rgba(255,255,255,0.1); padding: 24px; border-radius: 12px; max-width: 400px;">
-                    <h3 style="margin: 0 0 12px; color: #fff;">Resume Existing Game</h3>
-                    <p style="margin: 0 0 16px; font-size: 0.9em; color: rgba(255,255,255,0.8);">
-                        Have a room code? Enter it to jump back in — no login needed.
-                    </p>
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                        <input type="text" id="resume-code" placeholder="ABCD12"
-                            maxlength="6"
-                            style="flex:1; padding: 12px 14px; font-size: 1.1em; letter-spacing: 0.15em; text-transform: uppercase; border: none; border-radius: 8px; font-weight: 600;">
-                        <button class="btn btn-primary" onclick="resumeWithCode()" style="white-space: nowrap;">Join Game</button>
+                <!-- Resume form -->
+                <div id="resume" class="resume-card">
+                    <h3>Resume Existing Game</h3>
+                    <p class="hint">Have a room code? Enter it to jump back in — no login needed.</p>
+                    <div class="input-row">
+                        <input type="text" id="resume-code" class="code-input"
+                               placeholder="ABCD12" maxlength="6"
+                               aria-label="Room code">
+                        <button class="btn btn-primary" onclick="resumeWithCode()">Join Game</button>
                     </div>
-                    <div id="resume-error" style="color: #ff6b6b; font-size: 0.85em; margin-top: 8px; display: none;"></div>
-                    <p style="margin: 12px 0 0; font-size: 0.85em; color: rgba(255,255,255,0.7);">
-                        <a href="#" onclick="showForgotCode(event)" style="color: rgba(255,255,255,0.9);">Forgot your code?</a>
-                    </p>
+                    <div id="resume-error" class="resume-error" role="alert"></div>
+                    <a class="forgot-link" onclick="showForgotCode(event)" href="#">Forgot your code?</a>
 
                     <!-- Forgot code subform -->
-                    <div id="forgot-code-form" style="display: none; margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 16px;">
-                        <p style="margin: 0 0 10px; font-size: 0.9em; color: rgba(255,255,255,0.9);">
-                            Enter your email and we'll resend all your room codes.
-                        </p>
-                        <div style="display: flex; gap: 8px;">
-                            <input type="email" id="forgot-email" placeholder="your@email.com"
-                                style="flex:1; padding: 10px 12px; border: none; border-radius: 8px;">
-                            <button class="btn btn-primary" onclick="sendForgotCode()" style="white-space: nowrap;">Send Codes</button>
+                    <div id="forgot-code-form" class="forgot-subform">
+                        <p>Enter your email and we'll resend all your room codes.</p>
+                        <div class="input-row forgot-row">
+                            <input type="email" id="forgot-email" class="email-input-field"
+                                   placeholder="your@email.com">
+                            <button class="btn btn-primary" onclick="sendForgotCode()">Send Codes</button>
                         </div>
-                        <div id="forgot-success" style="color: #a8e6a3; font-size: 0.85em; margin-top: 8px; display: none;">
+                        <div id="forgot-success" class="forgot-success" role="status">
                             Check your email for your room codes!
                         </div>
                     </div>
                 </div>
-            </div>
+            </div><!-- /hero-content -->
+
             <div class="hero-visual">
-                <div class="hero-card">
-                    <div class="card-icon">💰</div>
-                    <h3>$1,500</h3>
-                    <p>Starting Capital</p>
+                <div class="stat-card reveal">
+                    <p class="stat-label">Seed Capital</p>
+                    <p class="stat-value">$1,500</p>
+                    <p class="stat-meta">Starting balance per player</p>
                 </div>
-                <div class="hero-card">
-                    <div class="card-icon">🏢</div>
-                    <h3>27</h3>
-                    <p>Properties</p>
+                <div class="stat-card reveal reveal-delay-1">
+                    <p class="stat-label">Foreclosable Assets</p>
+                    <p class="stat-value">27</p>
+                    <p class="stat-meta">Properties eligible for MBS</p>
                 </div>
-                <div class="hero-card">
-                    <div class="card-icon">📈</div>
-                    <h3>∞</h3>
-                    <p>Possibilities</p>
+                <div class="stat-card reveal reveal-delay-2">
+                    <p class="stat-label">Max Leverage</p>
+                    <p class="stat-value">∞</p>
+                    <p class="stat-meta">As God and Lehman intended</p>
                 </div>
             </div>
-        </div>
+        </div><!-- /hero-container -->
     </section>
+
+    <!-- Ticker Strip -->
+    <div class="ticker-strip" aria-hidden="true">
+        <div class="ticker-track">
+            <span class="up">MBS-AAA &nbsp;+12.4%</span>
+            <span class="ticker-divider">|</span>
+            <span class="flat">PROP-CORP &nbsp;$847</span>
+            <span class="ticker-divider">|</span>
+            <span class="down">CDO-ALPHA &nbsp;-3.2%</span>
+            <span class="ticker-divider">|</span>
+            <span class="flat">BANK-ONE &nbsp;$1,200</span>
+            <span class="ticker-divider">|</span>
+            <span class="down">SUBPRIME &nbsp;-8.7%</span>
+            <span class="ticker-divider">|</span>
+            <span class="up">RE-FUND &nbsp;+6.1%</span>
+            <span class="ticker-divider">|</span>
+            <span class="flat">MORT-SEC &nbsp;$2,400</span>
+            <span class="ticker-divider">|</span>
+            <!-- Duplicate for seamless loop -->
+            <span class="up">MBS-AAA &nbsp;+12.4%</span>
+            <span class="ticker-divider">|</span>
+            <span class="flat">PROP-CORP &nbsp;$847</span>
+            <span class="ticker-divider">|</span>
+            <span class="down">CDO-ALPHA &nbsp;-3.2%</span>
+            <span class="ticker-divider">|</span>
+            <span class="flat">BANK-ONE &nbsp;$1,200</span>
+            <span class="ticker-divider">|</span>
+            <span class="down">SUBPRIME &nbsp;-8.7%</span>
+            <span class="ticker-divider">|</span>
+            <span class="up">RE-FUND &nbsp;+6.1%</span>
+            <span class="ticker-divider">|</span>
+            <span class="flat">MORT-SEC &nbsp;$2,400</span>
+        </div>
+    </div>
 
     <!-- Features Section -->
     <section class="features" id="features">
         <div class="features-container">
-            <h2 class="section-title">Wall Street Meets Board Games</h2>
-            <p class="section-subtitle">All the sophisticated financial instruments you remember from 2008</p>
+            <div class="section-header reveal">
+                <span class="section-label">What You Can Do</span>
+                <h2 class="section-title">Wall Street Meets Board Games</h2>
+                <p class="section-subtitle">All the sophisticated financial instruments you remember from 2008</p>
+            </div>
 
             <div class="features-grid">
-                <div class="feature-card">
-                    <div class="feature-icon">📈</div>
+                <div class="feature-card reveal">
+                    <div class="feature-icon-wrap">📈</div>
                     <h3>IPO Your Properties</h3>
                     <p>Create corporations from your real estate portfolio. Issue stock, raise capital, and trade shares with other players.</p>
                     <ul class="feature-list">
@@ -107,8 +164,8 @@
                     </ul>
                 </div>
 
-                <div class="feature-card">
-                    <div class="feature-icon">💸</div>
+                <div class="feature-card reveal reveal-delay-1">
+                    <div class="feature-icon-wrap">💸</div>
                     <h3>Issue Debt Instruments</h3>
                     <p>Package your mortgages into securities. Collect interest, leverage your assets, and create complex financial structures.</p>
                     <ul class="feature-list">
@@ -118,12 +175,12 @@
                     </ul>
                 </div>
 
-                <div class="feature-card">
-                    <div class="feature-icon">🤝</div>
+                <div class="feature-card reveal reveal-delay-2">
+                    <div class="feature-icon-wrap">🤝</div>
                     <h3>Real-Time Multiplayer</h3>
                     <p>Play with friends online in private rooms. See every trade, IPO, and bankruptcy in real-time.</p>
                     <ul class="feature-list">
-                        <li>2-8 players per game</li>
+                        <li>2–8 players per game</li>
                         <li>Instant updates</li>
                         <li>Share rooms with invite codes</li>
                     </ul>
@@ -133,29 +190,30 @@
     </section>
 
     <!-- How It Works Section -->
-    <section class="how-it-works">
+    <section class="how-it-works" id="how-it-works">
         <div class="how-container">
-            <h2 class="section-title">How to Play</h2>
+            <div class="section-header reveal">
+                <span class="section-label">Getting Started</span>
+                <h2 class="section-title">How to Play</h2>
+            </div>
+
             <div class="steps">
-                <div class="step">
+                <div class="step reveal">
                     <div class="step-number">1</div>
                     <h3>Enter Your Email</h3>
                     <p>Click "Create New Game" — we'll send a magic link. No password needed.</p>
                 </div>
-                <div class="step-arrow">→</div>
-                <div class="step">
+                <div class="step reveal reveal-delay-1">
                     <div class="step-number">2</div>
                     <h3>Set Up Your Room</h3>
                     <p>Name your game, pick max players, and choose your nickname</p>
                 </div>
-                <div class="step-arrow">→</div>
-                <div class="step">
+                <div class="step reveal reveal-delay-2">
                     <div class="step-number">3</div>
                     <h3>Share Room Code</h3>
                     <p>Friends join with the 6-character code — no account required</p>
                 </div>
-                <div class="step-arrow">→</div>
-                <div class="step">
+                <div class="step reveal reveal-delay-3">
                     <div class="step-number">4</div>
                     <h3>Watch It Collapse</h3>
                     <p>Or succeed! Either way, it's more fun than 2008</p>
@@ -166,12 +224,12 @@
 
     <!-- CTA Section -->
     <section class="cta-section">
-        <div class="cta-container">
-            <h2>Ready to Play Wall Street Monopoly?</h2>
+        <div class="cta-container reveal">
+            <h2>Ready to Play<br><em>Wall Street Monopoly?</em></h2>
             <p>Free to play. No downloads. Just financial chaos with friends.</p>
-            <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin-top: 8px;">
+            <div class="cta-buttons">
                 <a href="auth.html" class="btn btn-primary btn-xl">Create New Game</a>
-                <a href="#resume" class="btn btn-secondary btn-xl">Resume Existing Game</a>
+                <a href="#resume" class="btn btn-ghost btn-xl">Resume Existing Game</a>
             </div>
         </div>
     </section>
@@ -181,10 +239,10 @@
         <div class="footer-container">
             <div class="footer-content">
                 <div class="footer-section">
-                    <h4>Mortgage Backed Monopoly</h4>
-                    <p>The most financially irresponsible way to play Monopoly.</p>
-                    <p style="margin-top: 10px; font-size: 0.9em; color: #95a5a6;">
-                        🤖 Built with <a href="https://claude.ai/claude-code" target="_blank" style="color: #667eea;">Claude Code</a>
+                    <p class="footer-brand-name">Mortgage Backed Monopoly</p>
+                    <p class="footer-tagline">The most financially irresponsible way to play Monopoly.</p>
+                    <p class="footer-built-with">
+                        Built with <a href="https://claude.ai/claude-code" target="_blank" rel="noopener">Claude Code</a>
                     </p>
                 </div>
                 <div class="footer-section">
@@ -197,7 +255,7 @@
                 </div>
                 <div class="footer-section">
                     <h4>Legal</h4>
-                    <p style="font-size: 0.85em; color: #95a5a6;">
+                    <p class="footer-legal">
                         This is a parody game. Not affiliated with Hasbro or actual financial instruments.
                         Please don't try any of this in real life.
                     </p>
@@ -208,19 +266,58 @@
             </div>
         </div>
     </footer>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="src/js/config.js"></script>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="src/js/config.js?v=3"></script>
+    <script src="src/js/supabase.js?v=3"></script>
     <script>
+        /* ── Nav: transparent over hero, glass when scrolled ── */
+        const nav = document.getElementById('main-nav');
+        window.addEventListener('scroll', () => {
+            nav.classList.toggle('scrolled', window.scrollY > 60);
+        }, { passive: true });
+
+        /* ── Scroll reveal via IntersectionObserver ── */
+        const revealEls = document.querySelectorAll('.reveal');
+        const revealObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('revealed');
+                    revealObserver.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+
+        revealEls.forEach(el => revealObserver.observe(el));
+
+        /* Immediately reveal elements already in the viewport on load */
+        document.addEventListener('DOMContentLoaded', () => {
+            revealEls.forEach(el => {
+                const rect = el.getBoundingClientRect();
+                if (rect.top < window.innerHeight) {
+                    el.classList.add('revealed');
+                    revealObserver.unobserve(el);
+                }
+            });
+
+            /* Enter key on resume code input */
+            const codeInput = document.getElementById('resume-code');
+            if (codeInput) {
+                codeInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') resumeWithCode();
+                });
+            }
+        });
+
+        /* ── Resume game functionality ── */
         function resumeWithCode() {
             const code = document.getElementById('resume-code').value.trim().toUpperCase();
             const errorEl = document.getElementById('resume-error');
-
             if (!code || code.length < 4) {
                 errorEl.textContent = 'Please enter a valid room code.';
                 errorEl.style.display = 'block';
                 return;
             }
-
             errorEl.style.display = 'none';
             window.location.href = `waiting.html?code=${encodeURIComponent(code)}`;
         }
@@ -233,22 +330,10 @@
         async function sendForgotCode() {
             const email = document.getElementById('forgot-email').value.trim();
             const successEl = document.getElementById('forgot-success');
-
             if (!email) return;
-
             await callSendRoomCode({ action: 'forgot_code', email });
             successEl.style.display = 'block';
         }
-
-        // Allow Enter key in resume code box
-        document.addEventListener('DOMContentLoaded', () => {
-            const codeInput = document.getElementById('resume-code');
-            if (codeInput) {
-                codeInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') resumeWithCode();
-                });
-            }
-        });
     </script>
 </body>
 </html>

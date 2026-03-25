@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
                 <div style="font-size: 2em; font-weight: bold; letter-spacing: 0.3em; background: #f0f0f0; padding: 16px; text-align: center; border-radius: 8px; margin: 16px 0;">
                     ${inviteCode}
                 </div>
-                <p><a href="${joinUrl}" style="background: #667eea; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 8px 0;">
+                <p><a href="${joinUrl}" style="background: #2D6A4F; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 8px 0;">
                     Click to Join Game
                 </a></p>
                 <p style="color: #999; font-size: 0.9em;">Or go to ${SITE_URL} and enter code <strong>${inviteCode}</strong> under "Resume Existing Game".</p>

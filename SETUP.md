@@ -5,7 +5,6 @@ This guide will help you set up the multiplayer version of Mortgage Backed Monop
 ## Prerequisites
 
 - A Supabase account (free tier is fine)
-- A Netlify account (for hosting)
 - Git installed on your computer
 
 ## Step 1: Create a Supabase Project
@@ -75,22 +74,49 @@ const SUPABASE_ANON_KEY = 'your-anon-key-here'; // Your anon/public key
    - Try logging in
    - Create a test game room
 
-## Step 7: Deploy to Netlify
+## Step 7: Deploy (Raspberry Pi / nginx)
 
-1. Make sure all your changes are committed to Git:
-   ```bash
-   git add .
-   git commit -m "Configure Supabase backend"
-   git push
-   ```
+The site is served directly from the Raspberry Pi using nginx on port 8888.
+No build step is needed — it's a pure static site.
 
-2. Netlify should automatically deploy your changes
-3. Wait for the deployment to complete
-4. Visit your site at `https://mortgagebacked.netlify.app`
+**Initial setup (already done on Pi):**
+```bash
+sudo apt-get install -y nginx
+sudo nano /etc/nginx/sites-available/mortgage-backed-game
+# (see config below)
+sudo ln -s /etc/nginx/sites-available/mortgage-backed-game /etc/nginx/sites-enabled/
+sudo systemctl enable nginx
+sudo systemctl start nginx
+```
+
+**nginx config** (`/etc/nginx/sites-available/mortgage-backed-game`):
+```nginx
+server {
+    listen 8888;
+    server_name _;
+
+    root /home/abdlh/mortgage-backed-game;
+    index landing.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
+```
+
+**After code changes:**
+```bash
+# Just push/pull the files — no rebuild needed
+# If nginx config changes, reload it:
+sudo systemctl reload nginx
+```
+
+**Access the site** from any device on the local network:
+- `http://192.168.4.57:8888`
 
 ## Step 8: Test the Live Site
 
-1. Go to your deployed site
+1. Go to `http://192.168.4.57:8888` from a device on the local network
 2. Create an account
 3. Create a game room
 4. Copy the invite code
@@ -152,6 +178,9 @@ The database is protected by Row Level Security (RLS) policies that ensure:
 ### "Row Level Security policy violation"
 - Make sure you ran the complete `database-setup.sql` file
 - Check the Supabase logs for more details
+- If you previously ran an older version of `database-setup.sql` and are seeing RLS errors,
+  run `fix-rls-complete.sql` in the SQL Editor — it disables RLS, drops all old policies,
+  and recreates them without circular references
 
 ### Real-time updates not working
 - Make sure you have Realtime enabled in your Supabase project

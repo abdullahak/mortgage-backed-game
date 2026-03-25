@@ -1,304 +1,220 @@
-// Supabase helper functions
+// API + real-time helpers (replaces Supabase)
 
-// Generate random invite code
-function generateInviteCode() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed similar looking characters
-    let code = '';
-    for (let i = 0; i < 6; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
+// ----------------------------------------------------------------
+// API fetch helper — attaches auth token automatically
+// ----------------------------------------------------------------
+async function apiFetch(path, options = {}) {
+    const token = localStorage.getItem('auth_token');
+    const res = await fetch(window.API_BASE + path, {
+        ...options,
+        headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...options.headers
+        }
+    });
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
     }
-    return code;
+    return res.json();
 }
 
-// Check authentication status
-async function requireAuth() {
-    const { data: { session } } = await supabase.auth.getSession();
+// ----------------------------------------------------------------
+// Socket.io connection (lazy — initialised once per page)
+// ----------------------------------------------------------------
+let _socket = null;
 
-    if (!session) {
+function getSocket() {
+    if (!_socket) {
+        const token = localStorage.getItem('auth_token');
+        _socket = io({ auth: token ? { token } : {} });
+    }
+    return _socket;
+}
+
+// ----------------------------------------------------------------
+// Auth helpers
+// ----------------------------------------------------------------
+
+async function requireAuth() {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
         window.location.href = 'landing.html';
         return null;
     }
-
-    return session;
+    try {
+        const user = await apiFetch('/auth/me');
+        return user;
+    } catch {
+        localStorage.removeItem('auth_token');
+        window.location.href = 'landing.html';
+        return null;
+    }
 }
 
-// Get current user
 async function getCurrentUser() {
-    const { data: { user } } = await supabase.auth.getUser();
-    return user;
+    const token = localStorage.getItem('auth_token');
+    if (!token) return null;
+    try {
+        return await apiFetch('/auth/me');
+    } catch {
+        return null;
+    }
 }
 
-// Handle logout
 async function handleLogout() {
     try {
-        const { error } = await supabase.auth.signOut();
-        if (error) throw error;
-
-        window.location.href = 'landing.html';
-    } catch (error) {
-        console.error('Logout error:', error);
-        alert('Error logging out: ' + error.message);
-    }
+        await apiFetch('/auth/signout', { method: 'POST' });
+    } catch {}
+    localStorage.removeItem('auth_token');
+    window.location.href = 'landing.html';
 }
 
-// Room management functions
+// ----------------------------------------------------------------
+// Room helpers
+// ----------------------------------------------------------------
 
 async function createNewRoom(roomName, maxPlayers, playerName) {
-    try {
-        const user = await getCurrentUser();
-        if (!user) throw new Error('Not authenticated');
-
-        const inviteCode = generateInviteCode();
-
-        // Create room
-        const { data: room, error: roomError } = await supabase
-            .from('rooms')
-            .insert({
-                invite_code: inviteCode,
-                host_id: user.id,
-                name: roomName,
-                max_players: maxPlayers,
-                status: 'waiting'
-            })
-            .select()
-            .single();
-
-        if (roomError) throw roomError;
-
-        // Add host as first member
-        const { error: memberError } = await supabase
-            .from('room_members')
-            .insert({
-                room_id: room.id,
-                user_id: user.id,
-                player_name: playerName
-            });
-
-        if (memberError) throw memberError;
-
-        return room;
-    } catch (error) {
-        console.error('Error creating room:', error);
-        throw error;
-    }
+    return apiFetch('/rooms', {
+        method: 'POST',
+        body: JSON.stringify({ name: roomName, max_players: maxPlayers, player_name: playerName })
+    });
 }
 
 async function joinRoomByCode(inviteCode, playerName) {
-    try {
-        const user = await getCurrentUser();
-        if (!user) throw new Error('Not authenticated');
+    // 1. Find room by code
+    const room = await apiFetch(`/rooms/by-code/${inviteCode.toUpperCase()}`);
 
-        // Find room by invite code
-        const { data: room, error: roomError } = await supabase
-            .from('rooms')
-            .select('*, room_members(*)')
-            .eq('invite_code', inviteCode.toUpperCase())
-            .single();
-
-        if (roomError) throw new Error('Room not found');
-
-        // Check if room is full
-        if (room.room_members.length >= room.max_players) {
-            throw new Error('Room is full');
-        }
-
-        // Check if user already in room
-        const alreadyJoined = room.room_members.some(member => member.user_id === user.id);
-        if (alreadyJoined) {
-            return room; // Already in room, just return it
-        }
-
-        // Check if room has started
-        if (room.status !== 'waiting') {
-            throw new Error('Game has already started');
-        }
-
-        // Add member to room
-        const { error: memberError } = await supabase
-            .from('room_members')
-            .insert({
-                room_id: room.id,
-                user_id: user.id,
-                player_name: playerName
-            });
-
-        if (memberError) throw memberError;
-
-        return room;
-    } catch (error) {
-        console.error('Error joining room:', error);
-        throw error;
-    }
+    // 2. Join the room (server handles "already joined" gracefully)
+    return apiFetch(`/rooms/${room.id}/join`, {
+        method: 'POST',
+        body: JSON.stringify({ player_name: playerName })
+    });
 }
 
 async function getUserRooms() {
     try {
-        const user = await getCurrentUser();
-        if (!user) return [];
-
-        const { data, error } = await supabase
-            .from('room_members')
-            .select(`
-                *,
-                rooms (
-                    *,
-                    room_members (*)
-                )
-            `)
-            .eq('user_id', user.id)
-            .order('joined_at', { ascending: false });
-
-        if (error) throw error;
-
-        return data.map(member => member.rooms).filter(room => room !== null);
-    } catch (error) {
-        console.error('Error fetching user rooms:', error);
+        return await apiFetch('/rooms/mine');
+    } catch {
         return [];
     }
 }
 
 async function getRoomById(roomId) {
-    try {
-        const { data, error } = await supabase
-            .from('rooms')
-            .select(`
-                *,
-                room_members (*)
-            `)
-            .eq('id', roomId)
-            .single();
-
-        if (error) throw error;
-
-        return data;
-    } catch (error) {
-        console.error('Error fetching room:', error);
-        throw error;
-    }
+    return apiFetch(`/rooms/${roomId}`);
 }
 
 async function startGame(roomId, initialGameState) {
-    try {
-        const user = await getCurrentUser();
-        if (!user) throw new Error('Not authenticated');
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
 
-        const room = await getRoomById(roomId);
+    const room = await getRoomById(roomId);
+    if (room.host_id !== user.id) throw new Error('Only the host can start the game');
 
-        // Check if user is host
-        if (room.host_id !== user.id) {
-            throw new Error('Only the host can start the game');
-        }
+    // Update room status to in_progress
+    await apiFetch(`/rooms/${roomId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'in_progress' })
+    });
 
-        // Update room status
-        const { error: roomError } = await supabase
-            .from('rooms')
-            .update({ status: 'in_progress' })
-            .eq('id', roomId);
+    // Create game record
+    const game = await apiFetch('/games', {
+        method: 'POST',
+        body: JSON.stringify({ room_id: roomId, game_state: initialGameState })
+    });
 
-        if (roomError) throw roomError;
+    // Log game start event
+    await logGameEvent(game.id, 'game_started', {
+        player_count: room.room_members.length,
+        players: room.room_members.map(m => m.player_name)
+    });
 
-        // Create game record
-        const { data: game, error: gameError } = await supabase
-            .from('games')
-            .insert({
-                room_id: roomId,
-                game_state: initialGameState,
-                current_player_index: 0
-            })
-            .select()
-            .single();
-
-        if (gameError) throw gameError;
-
-        // Log game start event
-        await logGameEvent(game.id, user.id, 'game_start', {
-            player_count: room.room_members.length,
-            players: room.room_members.map(m => m.player_name)
-        });
-
-        return game;
-    } catch (error) {
-        console.error('Error starting game:', error);
-        throw error;
-    }
-}
-
-async function updateGameState(gameId, newState) {
-    try {
-        const { error } = await supabase
-            .from('games')
-            .update({
-                game_state: newState,
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', gameId);
-
-        if (error) throw error;
-
-        return true;
-    } catch (error) {
-        console.error('Error updating game state:', error);
-        throw error;
-    }
+    return game;
 }
 
 async function getGameByRoomId(roomId) {
     try {
-        const { data, error } = await supabase
-            .from('games')
-            .select('*')
-            .eq('room_id', roomId)
-            .single();
-
-        if (error) {
-            if (error.code === 'PGRST116') {
-                // No game found
-                return null;
-            }
-            throw error;
-        }
-
-        return data;
-    } catch (error) {
-        console.error('Error fetching game:', error);
-        throw error;
+        return await apiFetch(`/games/by-room/${roomId}`);
+    } catch (err) {
+        if (err.message.includes('404') || err.message.includes('not found')) return null;
+        throw err;
     }
 }
 
-async function logGameEvent(gameId, playerId, eventType, eventData) {
+async function logGameEvent(gameId, eventType, eventData) {
     try {
-        const { error } = await supabase
-            .from('game_events')
-            .insert({
-                game_id: gameId,
-                player_id: playerId,
-                event_type: eventType,
-                event_data: eventData
-            });
-
-        if (error) throw error;
-
+        await apiFetch(`/games/${gameId}/events`, {
+            method: 'POST',
+            body: JSON.stringify({ event_type: eventType, event_data: eventData })
+        });
         return true;
-    } catch (error) {
-        console.error('Error logging game event:', error);
+    } catch (err) {
+        console.error('Error logging game event:', err);
         return false;
     }
 }
 
-// Call the send-room-code Edge Function (best-effort, non-blocking)
+// Send invite email via backend (best-effort)
 async function callSendRoomCode(payload) {
     try {
-        await fetch(`${SUPABASE_URL}/functions/v1/send-room-code`, {
+        await apiFetch('/rooms/send-code', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
     } catch (err) {
-        console.warn('send-room-code edge function error:', err);
+        console.warn('send-room-code error:', err);
     }
 }
 
+// ----------------------------------------------------------------
+// Real-time subscriptions (Socket.io)
+// ----------------------------------------------------------------
+
+// Subscribe to room member + status changes
+// Returns an object with an unsubscribe() method
+function subscribeToRoom(roomId, onMemberChange, onStatusChange) {
+    const socket = getSocket();
+    socket.emit('join_room', roomId);
+
+    function memberHandler(room) { if (onMemberChange) onMemberChange(room); }
+    function statusHandler(room) { if (onStatusChange) onStatusChange(room); }
+
+    socket.on('room:member_change', memberHandler);
+    socket.on('room:status_change', statusHandler);
+
+    return {
+        unsubscribe() {
+            socket.off('room:member_change', memberHandler);
+            socket.off('room:status_change', statusHandler);
+            socket.emit('leave_room', roomId);
+        }
+    };
+}
+
+// Subscribe to game state updates
+function subscribeToGame(roomId, onGameUpdate) {
+    const socket = getSocket();
+    socket.emit('join_room', roomId);
+
+    function gameHandler(game) { if (onGameUpdate) onGameUpdate(game); }
+    socket.on('game:state_update', gameHandler);
+
+    return {
+        unsubscribe() {
+            socket.off('game:state_update', gameHandler);
+        }
+    };
+}
+
+// Legacy alias used in waiting.js (kept for backwards compat)
+async function unsubscribeChannel(sub) {
+    if (sub && typeof sub.unsubscribe === 'function') sub.unsubscribe();
+}
+
+// ----------------------------------------------------------------
 // Shared utilities
+// ----------------------------------------------------------------
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -318,43 +234,12 @@ function formatTimeAgo(dateString) {
     return date.toLocaleDateString();
 }
 
-// Subscribe to room updates
-function subscribeToRoom(roomId, callback) {
-    return supabase
-        .channel(`room:${roomId}`)
-        .on(
-            'postgres_changes',
-            {
-                event: '*',
-                schema: 'public',
-                table: 'room_members',
-                filter: `room_id=eq.${roomId}`
-            },
-            callback
-        )
-        .subscribe();
-}
-
-// Subscribe to game updates
-function subscribeToGame(gameId, callback) {
-    return supabase
-        .channel(`game:${gameId}`)
-        .on(
-            'postgres_changes',
-            {
-                event: 'UPDATE',
-                schema: 'public',
-                table: 'games',
-                filter: `id=eq.${gameId}`
-            },
-            callback
-        )
-        .subscribe();
-}
-
-// Unsubscribe from channel
-async function unsubscribeChannel(channel) {
-    if (channel) {
-        await supabase.removeChannel(channel);
+// Generate random invite code (kept for any local usage)
+function generateInviteCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
+    return code;
 }

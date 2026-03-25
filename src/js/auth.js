@@ -1,8 +1,10 @@
-// Authentication — magic link only (no password)
+// Authentication — OTP code verification
 
-async function handleMagicLink() {
-    const email = document.getElementById('magic-link-email').value.trim();
-    const errorEl = document.getElementById('magic-link-error');
+let currentEmail = '';
+
+async function handleSendCode() {
+    const email = document.getElementById('email-input').value.trim();
+    const errorEl = document.getElementById('email-error');
 
     if (!email) {
         errorEl.textContent = 'Please enter your email address';
@@ -10,61 +12,98 @@ async function handleMagicLink() {
         return;
     }
 
-    const btn = document.getElementById('send-magic-link-btn');
+    const btn = document.getElementById('send-code-btn');
     btn.disabled = true;
     btn.textContent = 'Sending...';
     errorEl.classList.remove('active');
 
     try {
-        const { error } = await supabase.auth.signInWithOtp({
-            email,
-            options: {
-                emailRedirectTo: window.location.origin + '/lobby.html'
-            }
+        await apiFetch('/auth/send-otp', {
+            method: 'POST',
+            body: JSON.stringify({ email })
         });
 
-        if (error) throw error;
-
-        // Show success state
-        document.getElementById('magic-link-form').style.display = 'none';
-        document.getElementById('magic-link-sent').style.display = 'block';
+        currentEmail = email;
         document.getElementById('sent-to-email').textContent = email;
+        document.getElementById('step-email').style.display = 'none';
+        document.getElementById('step-code').style.display = 'block';
+        document.getElementById('code-input').focus();
 
     } catch (error) {
-        errorEl.textContent = error.message || 'Failed to send magic link. Please try again.';
+        errorEl.textContent = error.message || 'Failed to send code. Please try again.';
         errorEl.classList.add('active');
         btn.disabled = false;
-        btn.textContent = 'Send Magic Link';
-        console.error('Magic link error:', error);
+        btn.textContent = 'Send Code';
+        console.error('Send code error:', error);
     }
 }
 
-function resetForm() {
-    document.getElementById('magic-link-form').style.display = 'block';
-    document.getElementById('magic-link-sent').style.display = 'none';
-    document.getElementById('magic-link-email').value = '';
+async function handleVerifyCode() {
+    const token = document.getElementById('code-input').value.trim();
+    const errorEl = document.getElementById('code-error');
 
-    const btn = document.getElementById('send-magic-link-btn');
+    if (!token) {
+        errorEl.textContent = 'Please enter the 6-digit code';
+        errorEl.classList.add('active');
+        return;
+    }
+
+    const btn = document.getElementById('verify-code-btn');
+    btn.disabled = true;
+    btn.textContent = 'Verifying...';
+    errorEl.classList.remove('active');
+
+    try {
+        const data = await apiFetch('/auth/verify-otp', {
+            method: 'POST',
+            body: JSON.stringify({ email: currentEmail, token })
+        });
+
+        localStorage.setItem('auth_token', data.token);
+        window.location.href = 'lobby.html';
+
+    } catch (error) {
+        errorEl.textContent = error.message || 'Invalid or expired code. Please try again.';
+        errorEl.classList.add('active');
+        btn.disabled = false;
+        btn.textContent = 'Verify Code';
+        console.error('Verify code error:', error);
+    }
+}
+
+function resetToEmail() {
+    currentEmail = '';
+    document.getElementById('step-code').style.display = 'none';
+    document.getElementById('step-email').style.display = 'block';
+    document.getElementById('code-input').value = '';
+    document.getElementById('code-error').classList.remove('active');
+    const btn = document.getElementById('send-code-btn');
     btn.disabled = false;
-    btn.textContent = 'Send Magic Link';
+    btn.textContent = 'Send Code';
 }
 
 // If user is already authenticated, go straight to lobby
 async function checkAuth() {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session && !session.user.is_anonymous) {
-        window.location.href = 'lobby.html';
+    const token = localStorage.getItem('auth_token');
+    if (!token) return;
+    try {
+        const user = await apiFetch('/auth/me');
+        if (user && !user.is_anonymous) {
+            window.location.href = 'lobby.html';
+        }
+    } catch {
+        localStorage.removeItem('auth_token');
     }
 }
 
-// Handle Enter key
+// Handle Enter key on both inputs
 document.addEventListener('DOMContentLoaded', () => {
-    const emailInput = document.getElementById('magic-link-email');
-    if (emailInput) {
-        emailInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') handleMagicLink();
-        });
-    }
+    document.getElementById('email-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleSendCode();
+    });
+    document.getElementById('code-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleVerifyCode();
+    });
 
     checkAuth();
 });

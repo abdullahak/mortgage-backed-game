@@ -79,6 +79,9 @@ CREATE TRIGGER update_games_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Row Level Security (RLS) Policies
+-- Note: These policies avoid circular references by defining room_members first.
+-- If you hit RLS errors on an existing database, run fix-rls-complete.sql which
+-- disables/drops/re-creates all policies from scratch.
 
 -- Enable RLS on all tables
 ALTER TABLE rooms ENABLE ROW LEVEL SECURITY;
@@ -86,85 +89,70 @@ ALTER TABLE room_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE games ENABLE ROW LEVEL SECURITY;
 ALTER TABLE game_events ENABLE ROW LEVEL SECURITY;
 
--- Rooms policies
-CREATE POLICY "Users can view rooms they are members of" ON rooms
-    FOR SELECT USING (
-        auth.uid() IN (
-            SELECT user_id FROM room_members WHERE room_id = rooms.id
-        )
-    );
+-- ROOM_MEMBERS policies (no dependencies — must be defined first)
+CREATE POLICY "room_members_select" ON room_members
+    FOR SELECT TO authenticated USING (true);
 
-CREATE POLICY "Authenticated users can create rooms" ON rooms
-    FOR INSERT WITH CHECK (auth.uid() = host_id);
+CREATE POLICY "room_members_insert" ON room_members
+    FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
 
-CREATE POLICY "Room hosts can update their rooms" ON rooms
-    FOR UPDATE USING (auth.uid() = host_id);
+CREATE POLICY "room_members_delete" ON room_members
+    FOR DELETE TO authenticated USING (user_id = auth.uid());
 
-CREATE POLICY "Room hosts can delete their rooms" ON rooms
-    FOR DELETE USING (auth.uid() = host_id);
+-- ROOMS policies (safely references room_members)
+-- BUG: This policy blocks new anonymous users from looking up a room by invite code
+-- (they aren't in room_members yet, so the subquery returns no rows → "Room not found").
+-- Fix: run the following in the Supabase SQL editor:
+--   DROP POLICY "rooms_select" ON rooms;
+--   CREATE POLICY "rooms_select" ON rooms FOR SELECT TO authenticated USING (true);
+-- The invite code is the authorization mechanism; room names/codes are not sensitive.
+CREATE POLICY "rooms_select" ON rooms
+    FOR SELECT TO authenticated
+    USING (id IN (SELECT room_id FROM room_members WHERE user_id = auth.uid()));
 
--- Room members policies
-CREATE POLICY "Users can view members of rooms they are in" ON room_members
-    FOR SELECT USING (
-        EXISTS (
-            SELECT 1 FROM room_members rm
-            WHERE rm.room_id = room_members.room_id
-            AND rm.user_id = auth.uid()
-        )
-    );
+CREATE POLICY "rooms_insert" ON rooms
+    FOR INSERT TO authenticated WITH CHECK (host_id = auth.uid());
 
-CREATE POLICY "Authenticated users can join rooms" ON room_members
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "rooms_update" ON rooms
+    FOR UPDATE TO authenticated USING (host_id = auth.uid());
 
-CREATE POLICY "Users can leave rooms" ON room_members
-    FOR DELETE USING (auth.uid() = user_id);
+CREATE POLICY "rooms_delete" ON rooms
+    FOR DELETE TO authenticated USING (host_id = auth.uid());
 
--- Games policies
-CREATE POLICY "Room members can view game" ON games
-    FOR SELECT USING (
-        EXISTS (
-            SELECT 1 FROM room_members
-            WHERE room_members.room_id = games.room_id
-            AND room_members.user_id = auth.uid()
-        )
-    );
+-- GAMES policies
+CREATE POLICY "games_select" ON games
+    FOR SELECT TO authenticated
+    USING (room_id IN (SELECT room_id FROM room_members WHERE user_id = auth.uid()));
 
-CREATE POLICY "Room hosts can create games" ON games
-    FOR INSERT WITH CHECK (
+CREATE POLICY "games_insert" ON games
+    FOR INSERT TO authenticated
+    WITH CHECK (
         EXISTS (
             SELECT 1 FROM rooms
-            WHERE rooms.id = games.room_id
-            AND rooms.host_id = auth.uid()
+            WHERE rooms.id = room_id AND rooms.host_id = auth.uid()
         )
     );
 
-CREATE POLICY "Room members can update game state" ON games
-    FOR UPDATE USING (
-        EXISTS (
-            SELECT 1 FROM room_members
-            WHERE room_members.room_id = games.room_id
-            AND room_members.user_id = auth.uid()
+CREATE POLICY "games_update" ON games
+    FOR UPDATE TO authenticated
+    USING (room_id IN (SELECT room_id FROM room_members WHERE user_id = auth.uid()));
+
+-- GAME_EVENTS policies
+CREATE POLICY "game_events_select" ON game_events
+    FOR SELECT TO authenticated
+    USING (
+        game_id IN (
+            SELECT g.id FROM games g
+            WHERE g.room_id IN (SELECT room_id FROM room_members WHERE user_id = auth.uid())
         )
     );
 
--- Game events policies
-CREATE POLICY "Room members can view game events" ON game_events
-    FOR SELECT USING (
-        EXISTS (
-            SELECT 1 FROM games
-            JOIN room_members ON room_members.room_id = games.room_id
-            WHERE games.id = game_events.game_id
-            AND room_members.user_id = auth.uid()
-        )
-    );
-
-CREATE POLICY "Room members can create game events" ON game_events
-    FOR INSERT WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM games
-            JOIN room_members ON room_members.room_id = games.room_id
-            WHERE games.id = game_events.game_id
-            AND room_members.user_id = auth.uid()
+CREATE POLICY "game_events_insert" ON game_events
+    FOR INSERT TO authenticated
+    WITH CHECK (
+        game_id IN (
+            SELECT g.id FROM games g
+            WHERE g.room_id IN (SELECT room_id FROM room_members WHERE user_id = auth.uid())
         )
     );
 

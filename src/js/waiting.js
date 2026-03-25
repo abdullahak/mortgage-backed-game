@@ -2,7 +2,7 @@
 
 let currentRoom = null;
 let currentUser = null;
-let roomChannel = null;
+let roomSubscription = null;
 let isHost = false;
 
 // Get params from URL
@@ -25,10 +25,10 @@ async function initWaitingRoom() {
     }
 
     // Authenticated path (host or returning member)
-    const session = await requireAuth();
-    if (!session) return;
+    const user = await requireAuth();
+    if (!user) return;
 
-    currentUser = await getCurrentUser();
+    currentUser = user;
     const emailDisplay = document.getElementById('user-email');
     if (emailDisplay) {
         emailDisplay.textContent = currentUser.email || 'Guest';
@@ -72,11 +72,10 @@ async function joinAsGuest() {
     btn.textContent = 'Joining...';
 
     try {
-        // Sign in anonymously so RLS policies work
-        const { error: anonError } = await supabase.auth.signInAnonymously();
-        if (anonError) throw anonError;
-
-        currentUser = await getCurrentUser();
+        // Sign in anonymously
+        const anonData = await apiFetch('/auth/anonymous', { method: 'POST' });
+        localStorage.setItem('auth_token', anonData.token);
+        currentUser = anonData.user;
 
         // Join room by code
         const room = await joinRoomByCode(roomCode, playerName);
@@ -143,39 +142,30 @@ function subscribeToRoomUpdates() {
 }
 
 function subscribeToRoomUpdatesById(id) {
-    roomChannel = subscribeToRoom(id, async (payload) => {
-        console.log('Room update:', payload);
-        await loadRoomDataById(id);
-
-        if (payload.eventType === 'INSERT') {
-            logActivity('A new player joined the room');
-        } else if (payload.eventType === 'DELETE') {
-            logActivity('A player left the room');
-        }
-    });
-
-    supabase
-        .channel(`room-status:${id}`)
-        .on(
-            'postgres_changes',
-            {
-                event: 'UPDATE',
-                schema: 'public',
-                table: 'rooms',
-                filter: `id=eq.${id}`
-            },
-            async (payload) => {
-                console.log('Room status update:', payload);
-
-                if (payload.new.status === 'in_progress') {
-                    logActivity('Game is starting!');
-                    setTimeout(() => {
-                        window.location.href = `game.html?room=${id}`;
-                    }, 1500);
-                }
+    roomSubscription = subscribeToRoom(
+        id,
+        // onMemberChange
+        async (room) => {
+            console.log('Room member update:', room);
+            currentRoom = room;
+            renderPlayers(room.room_members);
+            document.getElementById('player-count').textContent =
+                `${room.room_members.length}/${room.max_players} players`;
+            updateStartButtonState(room.room_members.length);
+            logActivity('Player list updated');
+        },
+        // onStatusChange
+        async (room) => {
+            console.log('Room status update:', room);
+            updateRoomStatus(room.status);
+            if (room.status === 'in_progress') {
+                logActivity('Game is starting!');
+                setTimeout(() => {
+                    window.location.href = `game.html?room=${id}`;
+                }, 1500);
             }
-        )
-        .subscribe();
+        }
+    );
 }
 
 // Render players list
@@ -324,10 +314,8 @@ async function startGameFromLobby() {
                 name: member.player_name,
                 cash: 1500,
                 properties: [],
-                equities: [],
                 corporations: [],
                 debts: [],
-                interestOwed: 0,
                 netWorth: 1500,
                 bankrupt: false,
                 position: 0,
@@ -343,9 +331,7 @@ async function startGameFromLobby() {
                 id: `prop-${i}`,
                 ownerId: null,
                 ownerName: null,
-                owner: null,
                 houses: 0,
-                available: true
             })),
             corporations: [],
             gameLog: [],
@@ -385,18 +371,12 @@ async function leaveRoom() {
     try {
         const activeRoomId = currentRoom ? currentRoom.id : roomId;
 
-        if (currentUser) {
-            const { error } = await supabase
-                .from('room_members')
-                .delete()
-                .eq('room_id', activeRoomId)
-                .eq('user_id', currentUser.id);
-
-            if (error) throw error;
+        if (currentUser && activeRoomId) {
+            await apiFetch(`/rooms/${activeRoomId}/leave`, { method: 'DELETE' });
         }
 
-        if (roomChannel) {
-            await unsubscribeChannel(roomChannel);
+        if (roomSubscription) {
+            roomSubscription.unsubscribe();
         }
 
         window.location.href = 'landing.html';
@@ -452,14 +432,14 @@ const MONOPOLY_PROPERTIES = [
     { name: "Electric Company", color: "Utility", price: 150, rent: [4, 10] },
     { name: "States Avenue", color: "Pink", price: 140, rent: [10, 50, 150, 450, 625, 750] },
     { name: "Virginia Avenue", color: "Pink", price: 160, rent: [12, 60, 180, 500, 700, 900] },
-    { name: "Pennsylvania Railroad", color: "Railroad", price: 200, rent: [25, 50, 100, 200] },
+    { name: "Reading Railroad", color: "Railroad", price: 200, rent: [25, 50, 100, 200] },
     { name: "St. James Place", color: "Orange", price: 180, rent: [14, 70, 200, 550, 750, 950] },
     { name: "Tennessee Avenue", color: "Orange", price: 180, rent: [14, 70, 200, 550, 750, 950] },
     { name: "New York Avenue", color: "Orange", price: 200, rent: [16, 80, 220, 600, 800, 1000] },
     { name: "Kentucky Avenue", color: "Red", price: 220, rent: [18, 90, 250, 700, 875, 1050] },
     { name: "Indiana Avenue", color: "Red", price: 220, rent: [18, 90, 250, 700, 875, 1050] },
     { name: "Illinois Avenue", color: "Red", price: 240, rent: [20, 100, 300, 750, 925, 1100] },
-    { name: "B. & O. Railroad", color: "Railroad", price: 200, rent: [25, 50, 100, 200] },
+    { name: "Pennsylvania Railroad", color: "Railroad", price: 200, rent: [25, 50, 100, 200] },
     { name: "Atlantic Avenue", color: "Yellow", price: 260, rent: [22, 110, 330, 800, 975, 1150] },
     { name: "Ventnor Avenue", color: "Yellow", price: 260, rent: [22, 110, 330, 800, 975, 1150] },
     { name: "Water Works", color: "Utility", price: 150, rent: [4, 10] },
@@ -469,13 +449,14 @@ const MONOPOLY_PROPERTIES = [
     { name: "Pennsylvania Avenue", color: "Green", price: 320, rent: [28, 150, 450, 1000, 1200, 1400] },
     { name: "Short Line", color: "Railroad", price: 200, rent: [25, 50, 100, 200] },
     { name: "Park Place", color: "Dark Blue", price: 350, rent: [35, 175, 500, 1100, 1300, 1500] },
-    { name: "Boardwalk", color: "Dark Blue", price: 400, rent: [50, 200, 600, 1400, 1700, 2000] }
+    { name: "Boardwalk", color: "Dark Blue", price: 400, rent: [50, 200, 600, 1400, 1700, 2000] },
+    { name: "B. & O. Railroad", color: "Railroad", price: 200, rent: [25, 50, 100, 200] }
 ];
 
-// Cleanup on page unload (synchronous — browser won't wait for async)
+// Cleanup on page unload
 window.addEventListener('beforeunload', () => {
-    if (roomChannel) {
-        unsubscribeChannel(roomChannel);
+    if (roomSubscription) {
+        roomSubscription.unsubscribe();
     }
 });
 

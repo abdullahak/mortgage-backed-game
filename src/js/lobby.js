@@ -1,6 +1,7 @@
 // Lobby page functions
 
 let userSession = null;
+let lobbyRoomSubscriptions = [];
 
 // Initialize lobby
 async function initLobby() {
@@ -27,24 +28,29 @@ async function loadUserRooms() {
                     <p>No active games yet. Create one to get started!</p>
                 </div>
             `;
-            return;
+        } else {
+            roomsList.innerHTML = rooms.map(room => `
+                <div class="room-card" onclick="goToRoom('${room.id}')">
+                    <div class="room-card-header">
+                        <div class="room-name">${escapeHtml(room.name)}</div>
+                        <div class="room-status ${room.status}">${formatStatus(room.status)}</div>
+                    </div>
+                    <div class="room-info">
+                        <span>${room.room_members ? room.room_members.length : 0}/${room.max_players} players</span>
+                        <span>Created ${formatTimeAgo(room.created_at)}</span>
+                    </div>
+                    <div>
+                        <span class="room-invite-code">${room.invite_code}</span>
+                    </div>
+                </div>
+            `).join('');
         }
 
-        roomsList.innerHTML = rooms.map(room => `
-            <div class="room-card" onclick="goToRoom('${room.id}')">
-                <div class="room-card-header">
-                    <div class="room-name">${escapeHtml(room.name)}</div>
-                    <div class="room-status ${room.status}">${formatStatus(room.status)}</div>
-                </div>
-                <div class="room-info">
-                    <span>${room.room_members ? room.room_members.length : 0}/${room.max_players} players</span>
-                    <span>Created ${formatTimeAgo(room.created_at)}</span>
-                </div>
-                <div>
-                    <span class="room-invite-code">${room.invite_code}</span>
-                </div>
-            </div>
-        `).join('');
+        // Unsubscribe from old room sockets, then subscribe to current rooms
+        lobbyRoomSubscriptions.forEach(sub => sub.unsubscribe());
+        lobbyRoomSubscriptions = rooms.map(room =>
+            subscribeToRoom(room.id, () => loadUserRooms(), null)
+        );
     } catch (error) {
         console.error('Error loading rooms:', error);
         document.getElementById('active-rooms-list').innerHTML = `
@@ -92,7 +98,8 @@ async function createRoom() {
         closeModal('createRoomModal');
 
         // Notify host via email with room code (best-effort)
-        sendRoomCodeEmail(userSession.user.email, room.invite_code, room.name);
+        const me = await getCurrentUser();
+        if (me && me.email) sendRoomCodeEmail(me.email, room.invite_code, room.name);
 
         // Redirect to waiting room
         window.location.href = `waiting.html?room=${room.id}`;

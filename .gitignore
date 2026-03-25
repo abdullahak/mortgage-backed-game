@@ -19,3 +19,16 @@ Thumbs.db
 *.gslides
 # Local Netlify folder
 .netlify
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Environment
+.env
+backend/.env
+
+# SQLite database (runtime artifact)
+backend/game.db
+backend/game.db-shm
+backend/game.db-wal
