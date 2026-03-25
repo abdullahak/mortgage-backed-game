@@ -259,9 +259,13 @@ function togglePlayerCard(summaryEl) {
 
 // Render action buttons for current player's turn
 function renderActionButtons() {
+    const gameState = currentGame.game_state;
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+    const hasRolled = currentPlayer.diceRolled;
     const isHost = currentUser.id === currentRoom.host_id;
     return `
         <div class="action-buttons">
+            ${!hasRolled ? '<button class="btn btn-primary" style="margin-bottom:8px;width:100%;" onclick="rollDiceAndMove()">🎲 Roll Dice</button>' : ''}
             <button class="btn btn-success action-btn-end-turn" onclick="endTurn()">End Turn</button>
             <div class="action-btn-secondary-group">
                 <button class="btn btn-primary btn-sm" onclick="openBuyPropertyModal()">Buy Property</button>
@@ -303,6 +307,12 @@ function formatLogEvent(type, data) {
             return `Game over — ${data.reason}`;
         case 'house_purchase':
             return `${data.player} bought houses/hotels for $${Number(data.cost).toFixed(2)}`;
+        case 'dice_roll':
+            return `${data.player} rolled ${data.die1}+${data.die2}=${data.total} — moved to ${data.square}${data.isDoubles ? ' (doubles!)' : ''}`;
+        case 'card_draw':
+            return `${data.player} drew ${data.deckType}: "${data.card}"`;
+        case 'pass_go':
+            return `${data.player} passed GO — collected $${data.amount}`;
         default:
             return `${type}: ${JSON.stringify(data)}`;
     }
@@ -845,6 +855,8 @@ async function endTurn() {
         }
         gameState.currentPlayerIndex = nextIndex;
         const nextPlayer = gameState.players[nextIndex];
+        nextPlayer.diceRolled = false;
+        gameState.lastDiceRoll = null;
 
         gameState.gameLog.push({
             timestamp: new Date().toISOString(),
@@ -1272,12 +1284,14 @@ async function rollDiceAndMove() {
     const newPos = (oldPos + total) % 40;
 
     // Detect passing GO (only when not about to be sent to jail by card/square)
+    const passGoAmount = gameState.settings.passGoAmount || 200;
     if (newPos < oldPos) {
-        player.cash += (gameState.settings.passGoAmount || 200);
+        player.cash += passGoAmount;
         gameState.gameLog.push({
             timestamp: new Date().toISOString(),
-            message: `${player.name} passed GO — collected $${gameState.settings.passGoAmount || 200}!`
+            message: `${player.name} passed GO — collected $${passGoAmount}!`
         });
+        await logGameEvent('pass_go', { player: player.name, amount: passGoAmount });
     }
 
     player.position = newPos;
@@ -1290,6 +1304,13 @@ async function rollDiceAndMove() {
     gameState.gameLog.push({
         timestamp: new Date().toISOString(),
         message: `${player.name} rolled ${die1}+${die2}=${total} — moved to ${BOARD_SQUARES[newPos].name}${isDoubles ? ' (doubles — roll again!)' : ''}`
+    });
+
+    await logGameEvent('dice_roll', {
+        player: player.name,
+        die1, die2, total,
+        isDoubles,
+        square: BOARD_SQUARES[newPos].name
     });
 
     // Process landing effects (may modify gameState or show modals)
@@ -1393,6 +1414,15 @@ function handleCardDraw(deckType, gameState, activePlayerIndex) {
     document.getElementById('cardModalText').textContent = card.text;
     document.getElementById('cardModalEffect').textContent = 'Applied: ' + message;
     document.getElementById('cardModal').style.display = 'flex';
+
+    // Log to persistent game log
+    const playerName = gameState.players[activePlayerIndex] ? gameState.players[activePlayerIndex].name : 'Unknown';
+    logGameEvent('card_draw', {
+        player: playerName,
+        deckType: isChance ? 'Chance' : 'Community Chest',
+        card: card.text,
+        effect: message
+    });
 }
 
 // ---------------------------------------------------------------
