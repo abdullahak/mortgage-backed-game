@@ -50,6 +50,7 @@ db.exec(`
         room_id TEXT NOT NULL UNIQUE,
         game_state TEXT NOT NULL,
         current_player_index INTEGER NOT NULL DEFAULT 0,
+        state_version INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -63,5 +64,10 @@ db.exec(`
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 `);
+
+const gameColumns = db.prepare(`PRAGMA table_info(games)`).all().map(col => col.name);
+if (!gameColumns.includes('state_version')) {
+    db.exec(`ALTER TABLE games ADD COLUMN state_version INTEGER NOT NULL DEFAULT 0`);
+}
 
 module.exports = db;

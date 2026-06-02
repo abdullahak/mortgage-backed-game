@@ -112,13 +112,7 @@ async function startGame(roomId, initialGameState) {
     const room = await getRoomById(roomId);
     if (room.host_id !== user.id) throw new Error('Only the host can start the game');
 
-    // Update room status to in_progress
-    await apiFetch(`/rooms/${roomId}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'in_progress' })
-    });
-
-    // Create game record
+    // Create game record. The backend also marks the room in progress atomically.
     const game = await apiFetch('/games', {
         method: 'POST',
         body: JSON.stringify({ room_id: roomId, game_state: initialGameState })

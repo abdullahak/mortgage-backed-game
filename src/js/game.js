@@ -418,7 +418,7 @@ async function confirmPurchase() {
         return;
     }
 
-    const purchasePrice = parseFloat(document.getElementById('purchasePrice').value);
+    const purchasePrice = property.price;
 
     try {
         const gameState = currentGame.game_state;
@@ -447,7 +447,7 @@ async function confirmPurchase() {
         });
 
         // Update database
-        await updateGameState(gameState);
+        await updateGameState(gameState, 'property_purchase');
         renderGameState(currentGame.game_state);
 
         // Log event
@@ -510,7 +510,10 @@ async function createIPO() {
             totalShares: numShares,
             pricePerShare: pricePerShare,
             assets: selectedAssets,
-            shareholders: [{
+            shareholders: [],
+            founderShares: numShares,
+            availableShares: numShares,
+            founderHoldings: [{
                 userId: currentUser.id,
                 name: currentPlayerData.name,
                 shares: numShares
@@ -536,7 +539,7 @@ async function createIPO() {
         // Add corporation to player
         currentPlayerData.corporations.push({
             ticker: ticker,
-            sharesOwned: numShares,
+            sharesOwned: 0,
             totalShares: numShares
         });
 
@@ -546,7 +549,7 @@ async function createIPO() {
         });
 
         // Update database
-        await updateGameState(gameState);
+        await updateGameState(gameState, 'ipo_created');
         renderGameState(currentGame.game_state);
         await logGameEvent('ipo_created', {
             ticker: ticker,
@@ -637,7 +640,7 @@ async function issueDebt() {
             message: `${currentPlayerData.name} issued debt: $${loanAmount.toFixed(2)} @ ${interestRate}%`
         });
 
-        await updateGameState(gameState);
+        await updateGameState(gameState, 'debt_issued');
         renderGameState(currentGame.game_state);
         await logGameEvent('debt_issued', {
             issuer: currentPlayerData.name,
@@ -687,7 +690,7 @@ async function settleDebt() {
             });
         }
 
-        await updateGameState(gameState);
+        await updateGameState(gameState, 'debt_payment');
         renderGameState(currentGame.game_state);
         await logGameEvent('debt_payment', {
             payer: currentPlayerData.name,
@@ -709,7 +712,9 @@ async function openCorporationModal() {
 
     const corporationsHtml = gameState.corporations.map(corp => {
         const myShares = corp.shareholders.find(s => s.userId === currentUser.id);
-        const sharesAvailable = corp.totalShares - corp.shareholders.reduce((sum, s) => sum + s.shares, 0);
+        const sharesAvailable = typeof corp.availableShares === 'number'
+            ? corp.availableShares
+            : corp.totalShares - corp.shareholders.reduce((sum, s) => sum + s.shares, 0);
         const isFounder = corp.founderId === currentUser.id;
         const canBuy = isMyTurn && !isFounder && sharesAvailable > 0;
 
@@ -749,7 +754,9 @@ async function buyShares(corpId) {
 
     const numShares = parseInt(document.getElementById(`buyShares-${corpId}`).value);
     const totalCost = numShares * corp.pricePerShare;
-    const sharesAvailable = corp.totalShares - corp.shareholders.reduce((sum, s) => sum + s.shares, 0);
+        const sharesAvailable = typeof corp.availableShares === 'number'
+            ? corp.availableShares
+            : corp.totalShares - corp.shareholders.reduce((sum, s) => sum + s.shares, 0);
 
     if (!numShares || numShares < 1 || numShares > sharesAvailable) {
         alert(`Enter a valid number of shares (1–${sharesAvailable})`);
@@ -776,6 +783,7 @@ async function buyShares(corpId) {
         } else {
             corp.shareholders.push({ userId: currentUser.id, name: currentPlayerData.name, shares: numShares });
         }
+        corp.availableShares = Math.max(0, (typeof corp.availableShares === 'number' ? corp.availableShares : sharesAvailable) - numShares);
 
         // Update buyer's corporation list
         const myCorpEntry = currentPlayerData.corporations.find(c => c.ticker === corp.ticker);
@@ -790,7 +798,7 @@ async function buyShares(corpId) {
             message: `${currentPlayerData.name} bought ${numShares} share(s) of ${corp.ticker} for $${totalCost.toFixed(2)}`
         });
 
-        await updateGameState(gameState);
+        await updateGameState(gameState, 'share_purchase');
         renderGameState(currentGame.game_state);
         await logGameEvent('share_purchase', {
             buyer: currentPlayerData.name,
@@ -874,7 +882,7 @@ async function endTurn() {
             message: `${currentPlayerData.name} ended their turn. It's now ${nextPlayer.name}'s turn.`
         });
 
-        await updateGameState(gameState);
+        await updateGameState(gameState, 'turn_end');
         renderGameState(currentGame.game_state);
         await logGameEvent('turn_end', {
             player: currentPlayerData.name,
@@ -985,11 +993,18 @@ async function hostEndGame() {
 }
 
 // Update game state in database
-async function updateGameState(gameState) {
-    await apiFetch(`/games/${currentGame.id}/state`, {
+async function updateGameState(gameState, actionType) {
+    const updatedGame = await apiFetch(`/games/${currentGame.id}/state`, {
         method: 'PATCH',
-        body: JSON.stringify({ game_state: gameState })
+        body: JSON.stringify({
+            game_state: gameState,
+            action_type: actionType,
+            expected_version: currentGame.state_version
+        })
     });
+    currentGame = updatedGame;
+    currentPlayerData = currentGame.game_state.players.find(p => p.userId === currentUser.id);
+    return updatedGame;
 }
 
 // Log game event
@@ -1153,7 +1168,7 @@ async function executeTransaction() {
             message: `Transaction: ${player1.name} ↔ ${player2.name} ($${player1Cash} + ${player1Assets.length} assets ↔ $${player2Cash} + ${player2Assets.length} assets)`
         });
 
-        await updateGameState(gameState);
+        await updateGameState(gameState, 'transaction');
         renderGameState(currentGame.game_state);
         await logGameEvent('transaction', {
             player1: player1.name,
@@ -1206,7 +1221,7 @@ async function makePayment() {
             message: `${fromPlayer.name} paid $${amount.toFixed(2)} to ${toPlayer.name}`
         });
 
-        await updateGameState(gameState);
+        await updateGameState(gameState, 'manual_payment');
         renderGameState(currentGame.game_state);
         await logGameEvent('payment', {
             from: fromPlayer.name,
@@ -1294,7 +1309,7 @@ async function rollDiceAndMove() {
                 timestamp: new Date().toISOString(),
                 message: `${player.name} rolled doubles 3 times — sent to Jail!`
             });
-            await updateGameState(gameState);
+            await updateGameState(gameState, 'dice_roll');
             currentPlayerData = gameState.players.find(p => p.userId === currentUser.id);
             renderBoardTab();
             return;
@@ -1323,7 +1338,7 @@ async function rollDiceAndMove() {
                     timestamp: new Date().toISOString(),
                     message: `${player.name} is in Jail (turn ${player.jailTurns}/3). Rolled ${die1}+${die2}.`
                 });
-                await updateGameState(gameState);
+                await updateGameState(gameState, 'dice_roll');
                 currentPlayerData = gameState.players.find(p => p.userId === currentUser.id);
                 renderBoardTab();
                 return;
@@ -1366,11 +1381,13 @@ async function rollDiceAndMove() {
     });
 
     // Process landing effects (may modify gameState or show modals)
-    processLanding(player, newPos, gameState, total);
+    const landingEvents = processLanding(player, newPos, gameState, total);
 
     // Save updated state
-    await updateGameState(gameState);
-    currentPlayerData = gameState.players.find(p => p.userId === currentUser.id);
+    await updateGameState(gameState, 'dice_roll');
+    for (const event of landingEvents) {
+        await logGameEvent(event.type, event.data);
+    }
     renderGameState(currentGame.game_state);
     renderBoardTab();
 }
@@ -1380,6 +1397,7 @@ async function rollDiceAndMove() {
 // ---------------------------------------------------------------
 function processLanding(player, position, gameState, diceTotal) {
     const square = BOARD_SQUARES[position];
+    const landingEvents = [];
 
     switch (square.type) {
         case 'go':
@@ -1400,14 +1418,33 @@ function processLanding(player, position, gameState, diceTotal) {
                 const owner = gameState.players.find(p => p.userId === prop.ownerId);
                 if (owner && !owner.bankrupt) {
                     const rent = calculateRent(prop, gameState, diceTotal);
-                    showRentPrompt(square, prop, owner, rent);
+                    player.cash -= rent;
+                    owner.cash += rent;
+                    gameState.gameLog.push({
+                        timestamp: new Date().toISOString(),
+                        message: `${player.name} paid $${rent} rent to ${owner.name} for ${square.name}`
+                    });
+                    landingEvents.push({
+                        type: 'forced_payment',
+                        data: { from: player.name, to: owner.name, amount: rent, reason: `Rent for ${square.name}` }
+                    });
+                    showToast(`Paid $${rent} rent to ${owner.name}.`);
                 }
             }
             break;
         }
 
         case 'tax':
-            showTaxPrompt(square.taxAmount, square.name);
+            player.cash -= square.taxAmount;
+            gameState.gameLog.push({
+                timestamp: new Date().toISOString(),
+                message: `${player.name} paid $${square.taxAmount} to the Bank for ${square.name}`
+            });
+            landingEvents.push({
+                type: 'tax_payment',
+                data: { from: player.name, to: 'the Bank', amount: square.taxAmount, reason: square.name }
+            });
+            showToast(`Paid $${square.taxAmount} for ${square.name}.`);
             break;
 
         case 'chance':
@@ -1440,6 +1477,8 @@ function processLanding(player, position, gameState, diceTotal) {
         default:
             break;
     }
+
+    return landingEvents;
 }
 
 // ---------------------------------------------------------------
@@ -1530,7 +1569,7 @@ async function confirmRentPayment() {
             message: `${payer.name} paid $${pendingPayment.amount} to ${pendingPayment.toPlayerName}`
         });
 
-        await updateGameState(gameState);
+        await updateGameState(gameState, 'forced_payment');
         renderGameState(currentGame.game_state);
         await logGameEvent('payment', {
             from: payer.name,
@@ -1655,7 +1694,7 @@ async function confirmHousePurchase() {
             message: `${myPlayer.name} bought houses/hotels for $${totalCost}`
         });
 
-        await updateGameState(gameState);
+        await updateGameState(gameState, 'house_purchase');
         renderGameState(currentGame.game_state);
         await logGameEvent('house_purchase', {
             player: myPlayer.name,

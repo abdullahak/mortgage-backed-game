@@ -6,6 +6,7 @@ const { sendEmail } = require('../mailer');
 
 module.exports = (io) => {
 const router = express.Router();
+const VALID_ROOM_STATUSES = new Set(['waiting', 'in_progress', 'completed']);
 
 // Helper: get room with members
 function getRoomWithMembers(roomId) {
@@ -110,6 +111,7 @@ router.patch('/:id/status', requireAuth, (req, res) => {
     const room = getRoomWithMembers(req.params.id);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     if (room.host_id !== req.userId) return res.status(403).json({ error: 'Not the host' });
+    if (!VALID_ROOM_STATUSES.has(status)) return res.status(400).json({ error: 'Invalid room status' });
 
     db.prepare(`UPDATE rooms SET status = ? WHERE id = ?`).run(status, req.params.id);
     const updatedRoom = { ...room, status };

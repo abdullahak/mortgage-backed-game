@@ -27,11 +27,12 @@ function minimalGameState() {
     return {
         currentPlayerIndex: 0,
         players: [
-            { userId: user1.id, name: 'Alice', cash: 1500, position: 0, bankrupt: false, inJail: false },
-            { userId: user2.id, name: 'Bob',   cash: 1500, position: 0, bankrupt: false, inJail: false },
+            { userId: user1.id, name: 'Alice', cash: 1500, position: 0, bankrupt: false, inJail: false, properties: [], corporations: [], debts: [] },
+            { userId: user2.id, name: 'Bob',   cash: 1500, position: 0, bankrupt: false, inJail: false, properties: [], corporations: [], debts: [] },
         ],
         properties: [],
         corporations: [],
+        gameLog: [],
         lastDiceRoll: null,
         lastCardDrawn: null,
         settings: { passGoAmount: 200, startingCash: 1500 },
@@ -122,6 +123,33 @@ describe('POST /api/games', () => {
         const game = db.prepare(`SELECT game_state FROM games WHERE id = ?`).get(res.body.id);
         expect(typeof game.game_state).toBe('string');
         expect(() => JSON.parse(game.game_state)).not.toThrow();
+    });
+
+    test('duplicate create returns existing game instead of 500', async () => {
+        const gs = minimalGameState();
+        const first = await request(app)
+            .post('/api/games')
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send({ room_id: room.id, game_state: gs });
+
+        const second = await request(app)
+            .post('/api/games')
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send({ room_id: room.id, game_state: gs });
+
+        expect(second.status).toBe(200);
+        expect(second.body.id).toBe(first.body.id);
+    });
+
+    test('creating game marks room in_progress', async () => {
+        const gs = minimalGameState();
+        await request(app)
+            .post('/api/games')
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send({ room_id: room.id, game_state: gs });
+
+        const updatedRoom = db.prepare(`SELECT status FROM rooms WHERE id = ?`).get(room.id);
+        expect(updatedRoom.status).toBe('in_progress');
     });
 });
 
@@ -219,9 +247,10 @@ describe('PATCH /api/games/:id/state', () => {
         const res = await request(app)
             .patch(`/api/games/${gameId}/state`)
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ game_state: updatedGs });
+            .send({ game_state: updatedGs, action_type: 'turn_end', expected_version: 0 });
 
         expect(res.status).toBe(200);
+        expect(res.body.state_version).toBe(1);
     });
 
     test('state persisted after update', async () => {
@@ -229,7 +258,7 @@ describe('PATCH /api/games/:id/state', () => {
         await request(app)
             .patch(`/api/games/${gameId}/state`)
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ game_state: updatedGs });
+            .send({ game_state: updatedGs, action_type: 'turn_end', expected_version: 0 });
 
         const game = db.prepare(`SELECT game_state FROM games WHERE id = ?`).get(gameId);
         const parsed = JSON.parse(game.game_state);
@@ -240,7 +269,25 @@ describe('PATCH /api/games/:id/state', () => {
         const res = await request(app)
             .patch(`/api/games/${gameId}/state`)
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({});
+            .send({ action_type: 'turn_end', expected_version: 0 });
+
+        expect(res.status).toBe(400);
+    });
+
+    test('400 with missing action_type', async () => {
+        const res = await request(app)
+            .patch(`/api/games/${gameId}/state`)
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send({ game_state: minimalGameState(), expected_version: 0 });
+
+        expect(res.status).toBe(400);
+    });
+
+    test('400 with missing expected_version', async () => {
+        const res = await request(app)
+            .patch(`/api/games/${gameId}/state`)
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send({ game_state: minimalGameState(), action_type: 'turn_end' });
 
         expect(res.status).toBe(400);
     });
@@ -248,7 +295,7 @@ describe('PATCH /api/games/:id/state', () => {
     test('401 without auth', async () => {
         const res = await request(app)
             .patch(`/api/games/${gameId}/state`)
-            .send({ game_state: minimalGameState() });
+            .send({ game_state: minimalGameState(), action_type: 'turn_end', expected_version: 0 });
 
         expect(res.status).toBe(401);
     });
@@ -257,34 +304,66 @@ describe('PATCH /api/games/:id/state', () => {
         const res = await request(app)
             .patch('/api/games/nonexistent/state')
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ game_state: minimalGameState() });
+            .send({ game_state: minimalGameState(), action_type: 'turn_end', expected_version: 0 });
 
         expect(res.status).toBe(404);
     });
 
-    test('large game_state (8 players, many properties) round-trips correctly', async () => {
+    test('403 for authenticated user outside the room', async () => {
+        const { createUserFixture } = require('../helpers/fixtures');
+        const outsider = createUserFixture(db);
+
+        const res = await request(app)
+            .patch(`/api/games/${gameId}/state`)
+            .set('Authorization', `Bearer ${outsider.token}`)
+            .send({ game_state: { ...minimalGameState(), currentPlayerIndex: 1 }, action_type: 'turn_end', expected_version: 0 });
+
+        expect(res.status).toBe(403);
+    });
+
+    test('409 with stale expected_version', async () => {
+        const updatedGs = { ...minimalGameState(), currentPlayerIndex: 1 };
+        await request(app)
+            .patch(`/api/games/${gameId}/state`)
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send({ game_state: updatedGs, action_type: 'turn_end', expected_version: 0 });
+
+        const stale = { ...minimalGameState(), gameLog: [{ timestamp: new Date().toISOString(), message: 'stale' }] };
+        const res = await request(app)
+            .patch(`/api/games/${gameId}/state`)
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send({ game_state: stale, action_type: 'transaction', expected_version: 0 });
+
+        expect(res.status).toBe(409);
+    });
+
+    test('403 when non-current player attempts turn action', async () => {
+        const updatedGs = { ...minimalGameState(), currentPlayerIndex: 1 };
+        const res = await request(app)
+            .patch(`/api/games/${gameId}/state`)
+            .set('Authorization', `Bearer ${user2.token}`)
+            .send({ game_state: updatedGs, action_type: 'turn_end', expected_version: 0 });
+
+        expect(res.status).toBe(403);
+    });
+
+    test('large valid game_state round-trips correctly', async () => {
         const bigState = {
             ...minimalGameState(),
-            players: Array.from({ length: 8 }, (_, i) => ({
-                userId: `u${i}`, name: `Player${i}`, cash: 1500 + i * 100,
-                position: i * 5, bankrupt: false, inJail: false,
-            })),
-            properties: Array.from({ length: 28 }, (_, i) => ({
-                id: `prop-${i}`, color: 'Brown', price: 60 + i * 10,
-                rent: [2, 10, 30, 90, 160, 250], ownerId: null, houses: 0,
+            gameLog: Array.from({ length: 250 }, (_, i) => ({
+                timestamp: new Date().toISOString(),
+                message: `event ${i}`,
             })),
         };
 
         await request(app)
             .patch(`/api/games/${gameId}/state`)
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ game_state: bigState });
+            .send({ game_state: bigState, action_type: 'transaction', expected_version: 0 });
 
         const game = db.prepare(`SELECT game_state FROM games WHERE id = ?`).get(gameId);
         const parsed = JSON.parse(game.game_state);
-        expect(parsed.players).toHaveLength(8);
-        expect(parsed.properties).toHaveLength(28);
-        expect(parsed.players[7].cash).toBe(1500 + 7 * 100);
+        expect(parsed.gameLog).toHaveLength(250);
     });
 });
 
@@ -337,6 +416,18 @@ describe('POST /api/games/:id/events', () => {
         const event = db.prepare(`SELECT * FROM game_events WHERE game_id = ? AND event_type = 'test_event'`).get(gameId);
         expect(event).toBeTruthy();
         expect(JSON.parse(event.event_data)).toEqual({ foo: 'bar' });
+    });
+
+    test('403 for authenticated user outside the room', async () => {
+        const { createUserFixture } = require('../helpers/fixtures');
+        const outsider = createUserFixture(db);
+
+        const res = await request(app)
+            .post(`/api/games/${gameId}/events`)
+            .set('Authorization', `Bearer ${outsider.token}`)
+            .send({ event_type: 'test_event' });
+
+        expect(res.status).toBe(403);
     });
 
     test('multiple events can be logged in sequence', async () => {
@@ -418,7 +509,7 @@ describe('Game state integrity', () => {
 
         const unicodeState = {
             ...minimalGameState(),
-            players: [{ userId: user1.id, name: '日本語プレーヤー', cash: 1500, position: 0, bankrupt: false, inJail: false }],
+            players: [{ userId: user1.id, name: '日本語プレーヤー', cash: 1500, position: 0, bankrupt: false, inJail: false, properties: [], corporations: [], debts: [] }],
         };
 
         const createRes = await request(app)

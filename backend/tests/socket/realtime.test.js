@@ -218,6 +218,8 @@ describe('game:state_update broadcasts', () => {
 
         const room = createRoomFixture(db, uid1, { inviteCode: 'GUPD01', maxPlayers: 4 });
         const gs = buildGameState(['Alice', 'Bob']);
+        gs.players[0].userId = uid1;
+        gs.players[1].userId = uid2;
 
         // Create game
         const createRes = await request(app)
@@ -239,7 +241,7 @@ describe('game:state_update broadcasts', () => {
         await request(app)
             .patch(`/api/games/${gameId}/state`)
             .set('Authorization', `Bearer ${t1}`)
-            .send({ game_state: updatedGs });
+            .send({ game_state: updatedGs, action_type: 'turn_end', expected_version: 0 });
 
         await new Promise(r => setTimeout(r, 500));
 
@@ -260,6 +262,8 @@ describe('game:state_update broadcasts', () => {
         const room2 = createRoomFixture(db, uid2, { inviteCode: 'GUPD03', maxPlayers: 4 });
 
         const gs = buildGameState(['Alice', 'Bob']);
+        gs.players[0].userId = uid1;
+        gs.players[1].userId = uid2;
         const createRes = await request(app)
             .post('/api/games')
             .set('Authorization', `Bearer ${t1}`)
@@ -278,7 +282,7 @@ describe('game:state_update broadcasts', () => {
         await request(app)
             .patch(`/api/games/${gameId}/state`)
             .set('Authorization', `Bearer ${t1}`)
-            .send({ game_state: { ...gs, currentPlayerIndex: 1 } });
+            .send({ game_state: { ...gs, currentPlayerIndex: 1 }, action_type: 'turn_end', expected_version: 0 });
 
         await new Promise(r => setTimeout(r, 500));
         expect(receivedUpdate).toBe(false);

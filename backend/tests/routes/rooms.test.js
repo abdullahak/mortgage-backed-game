@@ -503,4 +503,16 @@ describe('PATCH /api/rooms/:id/status', () => {
 
         expect(res.status).toBe(404);
     });
+
+    test('400 rejects invalid room status', async () => {
+        const { createRoomFixture } = require('../helpers/fixtures');
+        const room = createRoomFixture(db, user1.id, { inviteCode: 'STAT06' });
+
+        const res = await request(app)
+            .patch(`/api/rooms/${room.id}/status`)
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send({ status: 'banana' });
+
+        expect(res.status).toBe(400);
+    });
 });

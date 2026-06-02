@@ -39,6 +39,28 @@ describe('POST /api/auth/send-otp', () => {
         expect(res.status).toBe(400);
     });
 
+    test('stores expiry in SQLite datetime format', async () => {
+        const res = await request(app)
+            .post('/api/auth/send-otp')
+            .send({ email: 'format@example.com' });
+
+        expect(res.status).toBe(200);
+        const otp = db.prepare(`SELECT expires_at FROM otps WHERE email = ?`).get('format@example.com');
+        expect(otp.expires_at).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    });
+
+    test('invalidates old OTPs case-insensitively', async () => {
+        await request(app)
+            .post('/api/auth/send-otp')
+            .send({ email: 'case@example.com' });
+        await request(app)
+            .post('/api/auth/send-otp')
+            .send({ email: 'CASE@example.com' });
+
+        const rows = db.prepare(`SELECT * FROM otps WHERE email = ?`).all('case@example.com');
+        expect(rows).toHaveLength(1);
+    });
+
     test('400 with invalid email format (no @)', async () => {
         const res = await request(app)
             .post('/api/auth/send-otp')

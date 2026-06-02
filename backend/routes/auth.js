@@ -35,18 +35,19 @@ router.post('/send-otp', async (req, res) => {
     if (!email || !email.includes('@')) {
         return res.status(400).json({ error: 'Valid email required' });
     }
+    const normalizedEmail = email.toLowerCase();
 
     const code = String(Math.floor(100000 + Math.random() * 900000));
     const id = uuidv4();
-    const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
+    const expires = toSqliteDate(new Date(Date.now() + 10 * 60 * 1000)); // 10 min
 
     // Invalidate old OTPs for this email
-    db.prepare(`DELETE FROM otps WHERE email = ?`).run(email);
+    db.prepare(`DELETE FROM otps WHERE email = ?`).run(normalizedEmail);
 
     db.prepare(`
         INSERT INTO otps (id, email, code, expires_at)
         VALUES (?, ?, ?, ?)
-    `).run(id, email.toLowerCase(), code, expires);
+    `).run(id, normalizedEmail, code, expires);
 
     try {
         await sendEmail(
@@ -114,3 +115,7 @@ router.post('/signout', requireAuth, (req, res) => {
 });
 
 module.exports = { router, requireAuth };
+
+function toSqliteDate(date) {
+    return date.toISOString().replace('T', ' ').slice(0, 19);
+}
