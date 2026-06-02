@@ -336,13 +336,24 @@ async function expectStaleStateRejected() {
 
 async function expectWrongTurnActionRejected() {
     const gs = clone(context.game.game_state);
-    gs.currentPlayerIndex = 1;
+    const currentPlayer = gs.players[gs.currentPlayerIndex];
+    const wrongPlayer = gs.players.find(player => player.userId !== currentPlayer.userId);
+    invariant(wrongPlayer, 'a non-current player exists for wrong-turn check');
+    gs.currentPlayerIndex = (gs.currentPlayerIndex + 1) % gs.players.length;
+
     const res = await rawApi(`/games/${context.game.id}/state`, {
         method: 'PATCH',
-        token: context.players[1].token,
+        token: tokenFor(wrongPlayer.name),
         body: { game_state: gs, action_type: 'turn_end', expected_version: context.game.state_version },
     });
     check(res.status === 403, 'non-current player cannot submit turn action', res);
+
+    if (res.status >= 200 && res.status < 300) {
+        await refreshGame();
+        const repaired = clone(context.game.game_state);
+        repaired.currentPlayerIndex = context.game.game_state.players.findIndex(player => player.userId === currentPlayer.userId);
+        await patchGameState(repaired, 'host_state_repair', context.players[0].token);
+    }
 }
 
 async function expectMarketActionMustInvolveActor() {
@@ -358,6 +369,16 @@ async function expectMarketActionMustInvolveActor() {
         body: { game_state: gs, action_type: 'transaction', expected_version: context.game.state_version },
     });
     check(res.status === 403, 'market action cannot mutate uninvolved players only', res);
+
+    if (res.status >= 200 && res.status < 300) {
+        await refreshGame();
+        const repaired = clone(context.game.game_state);
+        const repairedBob = playerByName(repaired, 'Bob');
+        const repairedCarol = playerByName(repaired, 'Carol');
+        repairedBob.cash += 10;
+        repairedCarol.cash -= 10;
+        await patchGameState(repaired, 'host_state_repair', context.players[0].token);
+    }
 }
 
 async function buyProperty(playerName, propId, price, opts = {}) {

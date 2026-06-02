@@ -1031,4 +1031,11 @@ body {
   .input-row .btn { width: 100%; }
   .forgot-row { flex-direction: column; }
   .forgot-row .btn { width: 100%; }
+  .forgot-link,
+  .footer-built-with a,
+  .footer-links a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
 }

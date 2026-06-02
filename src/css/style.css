@@ -772,6 +772,7 @@ body {
     .nav-tab {
         padding: 10px 6px;
         font-size: 0.9em;
+        min-height: 44px;
     }
 
     .content {
@@ -792,7 +793,8 @@ body {
     }
 
     .board-tab-wrapper {
-        overflow: hidden;
+        overflow-x: auto;
+        overflow-y: hidden;
     }
 }
 
@@ -834,6 +836,10 @@ body {
 }
 
 /* ===== BOARD TAB ===== */
+
+.mobile-board-view {
+    display: none;
+}
 
 .board-tab-wrapper {
     width: 100%;
@@ -1111,29 +1117,260 @@ body {
 
 /* Mobile: scroll the board horizontally */
 @media (max-width: 768px) {
+    .mobile-board-view {
+        display: block;
+    }
     .board-tab-wrapper {
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
+        display: none;
+    }
+    .mobile-board-hero,
+    .mobile-board-turn,
+    .mobile-board-section,
+    .mobile-board-card {
+        background: #f8f9fa;
+        border: 1px solid #dfe6e9;
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 12px;
+    }
+    .mobile-board-hero {
+        border-color: rgba(64, 145, 108, 0.35);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+    }
+    .mobile-board-label {
+        color: #6b7b7e;
+        font-size: 0.78rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 4px;
+    }
+    .mobile-board-hero h2 {
+        color: #2c3e50;
+        font-size: 1.45rem;
+        line-height: 1.15;
+        margin-bottom: 8px;
+    }
+    .mobile-board-turn {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .mobile-board-turn strong {
+        color: #2c3e50;
+        font-size: 1.15rem;
+    }
+    .mobile-board-turn .dice-area {
+        gap: 6px;
+    }
+    .mobile-board-turn .die {
+        width: 38px;
+        height: 38px;
+        font-size: 1.3rem;
+        border-radius: 8px;
+    }
+    .mobile-board-controls {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+    }
+    .mobile-board-controls .btn {
+        flex: 1 1 150px;
+        margin: 0 !important;
+        min-height: 44px;
+    }
+    .mobile-board-section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 10px;
+    }
+    .mobile-board-section-header h3 {
+        color: #2c3e50;
+        font-size: 1.05rem;
+    }
+    .mobile-board-section-header span {
+        color: #7f8c8d;
+        font-size: 0.82rem;
+    }
+    .mobile-board-upcoming,
+    .mobile-board-track,
+    .mobile-board-players {
+        display: grid;
+        gap: 8px;
+    }
+    .mobile-board-upcoming {
+        grid-template-columns: 1fr;
+    }
+    .mobile-board-square {
+        background: #fff;
+        border: 1px solid #e4eaec;
+        border-left: 6px solid var(--square-color, #dfe6e9);
+        border-radius: 10px;
+        min-height: 58px;
+        padding: 10px;
+    }
+    .mobile-board-square.is-current-square {
+        border-color: rgba(64, 145, 108, 0.45);
+        border-left-color: #2D6A4F;
+        box-shadow: inset 0 0 0 1px rgba(64, 145, 108, 0.18);
+        background: #f4fbf6;
+    }
+    .mobile-square-main,
+    .mobile-board-player {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .mobile-square-position {
+        width: 34px;
+        height: 34px;
+        border-radius: 8px;
+        background: #eef3f0;
+        color: #2c3e50;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        flex-shrink: 0;
+        font-variant-numeric: tabular-nums;
+    }
+    .mobile-square-copy {
+        flex: 1;
+        min-width: 0;
+    }
+    .mobile-square-name {
+        color: #2c3e50;
+        font-weight: 800;
+        line-height: 1.2;
+    }
+    .mobile-square-meta {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 4px;
+        color: #6b7b7e;
+        font-size: 0.82rem;
+    }
+    .mobile-square-meta span {
+        min-width: 0;
+    }
+    .mobile-square-tokens {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        flex-shrink: 0;
+        max-width: 92px;
+    }
+    .mobile-player-token {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        background: var(--token-color);
+        color: #fff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.7rem;
+        font-weight: 800;
+        border: 2px solid rgba(255,255,255,0.9);
+        box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    }
+    .mobile-player-token.is-you {
+        outline: 2px solid #2c3e50;
+    }
+    .mobile-board-player {
+        min-height: 54px;
+        background: #fff;
+        border: 1px solid #e4eaec;
+        border-radius: 10px;
+        padding: 10px;
+    }
+    .mobile-board-player.is-turn-player {
+        background: rgba(64, 145, 108, 0.1);
+        border-color: rgba(64, 145, 108, 0.28);
+    }
+    .mobile-player-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--token-color);
+        flex-shrink: 0;
+    }
+    .mobile-board-player > div {
+        flex: 1;
+        min-width: 0;
+    }
+    .mobile-player-name {
+        color: #2c3e50;
+        font-weight: 800;
+        line-height: 1.2;
+    }
+    .mobile-player-name span {
+        color: #40916C;
+        font-size: 0.78rem;
+        margin-left: 4px;
+    }
+    .mobile-player-location {
+        color: #6b7b7e;
+        font-size: 0.82rem;
+        margin-top: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .mobile-board-player strong {
+        color: #2c3e50;
+        font-variant-numeric: tabular-nums;
+    }
+    .mobile-board-card .board-card-text {
+        max-width: none;
+        font-size: 0.9rem;
     }
 }
 
 /* Sticky mobile action bar */
 @media (max-width: 768px) {
+    #gameContent {
+        display: flex;
+        flex-direction: column;
+    }
+    #gameContent .game-header {
+        order: 1;
+    }
+    #gameContent .action-buttons {
+        order: 2;
+    }
+    #gameContent .players-grid {
+        order: 3;
+    }
+    #gameContent .recent-log {
+        order: 4;
+    }
     body.is-my-turn .action-buttons {
-        position: fixed;
-        bottom: 0; left: 0; right: 0;
+        position: sticky;
+        bottom: 0;
         z-index: 200;
         background: rgba(255, 255, 255, 0.97);
         padding: 10px 12px;
         padding-bottom: calc(10px + env(safe-area-inset-bottom));
         box-shadow: 0 -3px 12px rgba(0,0,0,0.15);
-        border-top: 2px solid #40916C;
-        margin-top: 0;
+        border: 2px solid rgba(64, 145, 108, 0.25);
+        border-radius: 12px;
+        margin: 12px 0 16px;
         gap: 8px;
         flex-direction: column;
     }
     body.is-my-turn .content {
-        padding-bottom: 300px;
+        padding-bottom: 16px;
     }
     .action-btn-end-turn {
         width: 100%;
@@ -1150,6 +1387,20 @@ body {
     .action-btn-secondary-group .btn {
         width: 100%;
         margin: 0;
+    }
+    .player-card-summary {
+        min-height: 44px;
+    }
+    .center-panel .btn {
+        min-height: 44px;
+        padding: 8px 12px;
+        font-size: 0.82rem;
+    }
+    .auth-container a,
+    .resume-card .forgot-link {
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
     }
 }
 

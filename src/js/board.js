@@ -378,6 +378,166 @@ function renderSquare(square, gameState, currentUserId, playerIndex) {
     </div>`;
 }
 
+function boardEscape(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getSquareProperty(square, gameState) {
+    if (!square.propertyId || !gameState.properties) return null;
+    return gameState.properties.find(p => p.id === square.propertyId) || null;
+}
+
+function getPlayersOnSquare(gameState, position) {
+    return gameState.players.filter(p => !p.bankrupt && (p.position || 0) === position);
+}
+
+function renderMobileTokens(players, gameState, currentUserId) {
+    if (players.length === 0) return '';
+    return `<div class="mobile-square-tokens">
+        ${players.map(p => {
+            const pIdx = gameState.players.indexOf(p);
+            const color = PLAYER_COLORS[pIdx % PLAYER_COLORS.length];
+            const initials = boardEscape(p.name.substring(0, 2).toUpperCase());
+            const label = boardEscape(p.name);
+            return `<span class="mobile-player-token${p.userId === currentUserId ? ' is-you' : ''}"
+                style="--token-color:${color}" title="${label}">${initials}</span>`;
+        }).join('')}
+    </div>`;
+}
+
+function renderMobileSquareMeta(square, property) {
+    if (property) {
+        const owner = property.ownerName ? boardEscape(property.ownerName) : 'Unowned';
+        const price = property.price != null ? `$${property.price}` : '';
+        const houses = property.houses > 0
+            ? `<span>${property.houses === 5 ? 'Hotel' : `${property.houses} house${property.houses === 1 ? '' : 's'}`}</span>`
+            : '';
+        return `<div class="mobile-square-meta">
+            <span>${owner}</span>
+            ${price ? `<span>${price}</span>` : ''}
+            ${houses}
+        </div>`;
+    }
+
+    const typeLabels = {
+        go: 'Collect salary',
+        chance: 'Draw Chance',
+        community_chest: 'Draw Community Chest',
+        tax: square.taxAmount ? `Tax $${square.taxAmount}` : 'Tax',
+        railroad: 'Railroad',
+        utility: 'Utility',
+        jail: 'Jail',
+        free_parking: 'Free Parking',
+        go_to_jail: 'Go to Jail',
+    };
+    return `<div class="mobile-square-meta"><span>${typeLabels[square.type] || boardEscape(square.type)}</span></div>`;
+}
+
+function renderMobileBoardSquare(square, gameState, currentUserId, options = {}) {
+    const property = getSquareProperty(square, gameState);
+    const playersHere = getPlayersOnSquare(gameState, square.position);
+    const colorStyle = square.color ? ` style="--square-color:${square.color}"` : '';
+    const ownedClass = property && property.ownerId ? ' is-owned' : '';
+    const currentClass = options.current ? ' is-current-square' : '';
+    const upcomingClass = options.upcoming ? ' is-upcoming-square' : '';
+
+    return `<div class="mobile-board-square${ownedClass}${currentClass}${upcomingClass}"${colorStyle}>
+        <div class="mobile-square-main">
+            <span class="mobile-square-position">${square.position}</span>
+            <div class="mobile-square-copy">
+                <div class="mobile-square-name">${boardEscape(square.name)}</div>
+                ${renderMobileSquareMeta(square, property)}
+            </div>
+            ${renderMobileTokens(playersHere, gameState, currentUserId)}
+        </div>
+    </div>`;
+}
+
+function renderMobileBoard(gameState, currentUserId, controlsHtml, diceHtml, cardHtml) {
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+    const myPlayer = gameState.players.find(p => p.userId === currentUserId);
+    const focusPlayer = myPlayer || currentPlayer || gameState.players[0];
+    const focusPosition = focusPlayer ? (focusPlayer.position || 0) : 0;
+    const focusSquare = BOARD_SQUARES[focusPosition] || BOARD_SQUARES[0];
+    const currentTurnName = currentPlayer ? boardEscape(currentPlayer.name) : 'Waiting';
+
+    const upcomingHtml = Array.from({ length: 5 }, (_, i) => {
+        const square = BOARD_SQUARES[(focusPosition + i + 1) % BOARD_SQUARES.length];
+        return renderMobileBoardSquare(square, gameState, currentUserId, { upcoming: true });
+    }).join('');
+
+    const trackHtml = BOARD_SQUARES.map(square => {
+        const isCurrent = square.position === focusPosition;
+        return renderMobileBoardSquare(square, gameState, currentUserId, { current: isCurrent });
+    }).join('');
+
+    const playersHtml = gameState.players.map((p, i) => {
+        const color = PLAYER_COLORS[i % PLAYER_COLORS.length];
+        const square = BOARD_SQUARES[p.position || 0] || BOARD_SQUARES[0];
+        const currentClass = i === gameState.currentPlayerIndex ? ' is-turn-player' : '';
+        const youClass = p.userId === currentUserId ? ' is-you' : '';
+        return `<div class="mobile-board-player${currentClass}${youClass}">
+            <span class="mobile-player-dot" style="--token-color:${color}"></span>
+            <div>
+                <div class="mobile-player-name">${boardEscape(p.name)}${p.userId === currentUserId ? ' <span>You</span>' : ''}</div>
+                <div class="mobile-player-location">${boardEscape(square.name)}</div>
+            </div>
+            <strong>$${Math.round(p.cash || 0)}</strong>
+        </div>`;
+    }).join('');
+
+    return `<div class="mobile-board-view">
+        <section class="mobile-board-hero">
+            <div>
+                <p class="mobile-board-label">${focusPlayer && focusPlayer.userId === currentUserId ? 'Your position' : 'Current position'}</p>
+                <h2>${boardEscape(focusSquare.name)}</h2>
+                ${renderMobileSquareMeta(focusSquare, getSquareProperty(focusSquare, gameState))}
+            </div>
+            ${renderMobileTokens(getPlayersOnSquare(gameState, focusSquare.position), gameState, currentUserId)}
+        </section>
+
+        <section class="mobile-board-turn">
+            <div>
+                <p class="mobile-board-label">Turn</p>
+                <strong>${currentTurnName}</strong>
+            </div>
+            ${diceHtml}
+        </section>
+
+        ${controlsHtml ? `<div class="mobile-board-controls">${controlsHtml}</div>` : ''}
+        ${cardHtml ? `<section class="mobile-board-card">${cardHtml}</section>` : ''}
+
+        <section class="mobile-board-section">
+            <div class="mobile-board-section-header">
+                <h3>Coming Up</h3>
+                <span>next 5 spaces</span>
+            </div>
+            <div class="mobile-board-upcoming">${upcomingHtml}</div>
+        </section>
+
+        <section class="mobile-board-section">
+            <div class="mobile-board-section-header">
+                <h3>Players</h3>
+                <span>${gameState.players.length} active</span>
+            </div>
+            <div class="mobile-board-players">${playersHtml}</div>
+        </section>
+
+        <section class="mobile-board-section">
+            <div class="mobile-board-section-header">
+                <h3>Full Track</h3>
+                <span>0-39</span>
+            </div>
+            <div class="mobile-board-track">${trackHtml}</div>
+        </section>
+    </div>`;
+}
+
 function renderBoard(gameState, currentUserId) {
     if (!gameState) return '<p>Loading board...</p>';
 
@@ -451,12 +611,10 @@ function renderBoard(gameState, currentUserId) {
 
     // All 40 squares
     const squaresHtml = BOARD_SQUARES.map(sq => renderSquare(sq, gameState, currentUserId)).join('\n');
+    const controlsHtml = `${rollBtnHtml}${houseBtnHtml}`;
 
     return `
-        <div class="mobile-board-controls">
-            ${rollBtnHtml}
-            ${houseBtnHtml}
-        </div>
+        ${renderMobileBoard(gameState, currentUserId, controlsHtml, diceHtml, cardHtml)}
         <div class="board-tab-wrapper">
             <div class="board-grid">
                 ${squaresHtml}
@@ -469,6 +627,12 @@ function scaleBoardToFit() {
     const wrapper = document.querySelector('.board-tab-wrapper');
     const grid = document.querySelector('.board-grid');
     if (!wrapper || !grid) return;
+    if (window.matchMedia('(max-width: 768px)').matches) {
+        grid.style.transform = '';
+        grid.style.transformOrigin = '';
+        wrapper.style.height = '';
+        return;
+    }
     const BOARD_SIZE = 668;
     const available = wrapper.clientWidth - 4;
     const scale = Math.min(1, available / BOARD_SIZE);
