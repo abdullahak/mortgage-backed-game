@@ -72,7 +72,7 @@ function proxyHttp(req, res) {
 
 function serveStatic(req, res) {
     const requested = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
-    const relative = requested === '/' ? '/landing.html' : requested;
+    const relative = requested === '/' ? '/index.html' : requested;
     const fullPath = path.normalize(path.join(ROOT, relative));
     if (!fullPath.startsWith(ROOT)) {
         res.writeHead(403);
