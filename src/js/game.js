@@ -143,6 +143,7 @@ function renderGameState(gameState) {
 
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     const isMyTurn = currentPlayer.userId === currentUser.id;
+    const landing = getLandingSummary(gameState, currentPlayer);
 
     document.body.classList.toggle('is-my-turn', isMyTurn);
 
@@ -153,8 +154,15 @@ function renderGameState(gameState) {
 
     gameContent.innerHTML = `
         <div class="game-header">
-            <h2>Current Turn: ${currentPlayer.name}</h2>
+            <h2>Current Turn: ${escapeHtml(currentPlayer.name)}</h2>
             ${isMyTurn ? '<p class="turn-indicator">It\'s your turn!</p>' : '<p class="waiting-indicator">Waiting for other players...</p>'}
+            <div class="landing-summary ${landing.canBuy ? 'can-buy' : ''}">
+                <div>
+                    <span class="landing-label">${escapeHtml(landing.label)}</span>
+                    <strong>${escapeHtml(landing.squareName)}</strong>
+                </div>
+                <p>${escapeHtml(landing.detail)}</p>
+            </div>
         </div>
 
         <div class="players-grid">
@@ -177,6 +185,55 @@ function renderGameState(gameState) {
     `;
 
     updateTurnBanner();
+}
+
+function getLandingSummary(gameState, player) {
+    const position = player.position || 0;
+    const square = BOARD_SQUARES[position] || BOARD_SQUARES[0];
+    const dice = Array.isArray(gameState.lastDiceRoll) ? gameState.lastDiceRoll : null;
+    const label = dice ? `Rolled ${dice[0]} + ${dice[1]}` : `Position ${position}`;
+    const property = square.propertyId
+        ? gameState.properties.find(prop => prop.id === square.propertyId)
+        : null;
+    const isBuyableSquare = ['property', 'railroad', 'utility'].includes(square.type);
+    const canBuy = !!(isBuyableSquare && property && !property.ownerId);
+
+    if (canBuy) {
+        return {
+            label,
+            squareName: square.name,
+            detail: `Unowned ${square.type.replace('_', ' ')}. You can buy it for $${property.price}.`,
+            canBuy,
+        };
+    }
+
+    if (isBuyableSquare && property && property.ownerId) {
+        const owner = gameState.players.find(p => p.userId === property.ownerId);
+        const ownerName = owner ? owner.name : property.ownerName || 'another player';
+        return {
+            label,
+            squareName: square.name,
+            detail: property.ownerId === player.userId ? 'You already own this square.' : `Owned by ${ownerName}.`,
+            canBuy: false,
+        };
+    }
+
+    const detailsByType = {
+        go: 'Collect salary when you pass GO.',
+        community_chest: 'Community Chest effect is applied automatically.',
+        chance: 'Chance effect is applied automatically.',
+        tax: `Tax square. Amount: $${square.taxAmount || 0}.`,
+        jail: player.inJail ? 'You are in Jail.' : 'Just visiting.',
+        free_parking: 'Free Parking.',
+        go_to_jail: 'Go directly to Jail.',
+    };
+
+    return {
+        label,
+        squareName: square.name,
+        detail: detailsByType[square.type] || 'No purchasable property on this square.',
+        canBuy: false,
+    };
 }
 
 // Render individual player card
@@ -278,12 +335,16 @@ function renderActionButtons() {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     const hasRolled = currentPlayer.diceRolled;
     const isHost = currentUser.id === currentRoom.host_id;
+    const landing = getLandingSummary(gameState, currentPlayer);
+    const buyButton = landing.canBuy
+        ? '<button class="btn btn-success btn-sm action-btn-buy" onclick="openBuyPropertyModal()">Buy Property</button>'
+        : `<button class="btn btn-secondary btn-sm action-btn-buy" disabled title="${escapeHtml(landing.detail)}">${escapeHtml(buyUnavailableLabel(landing))}</button>`;
     return `
         <div class="action-buttons">
             ${!hasRolled ? '<button class="btn btn-primary" style="margin-bottom:8px;width:100%;" onclick="rollDiceAndMove()">🎲 Roll Dice</button>' : ''}
             <button class="btn btn-success action-btn-end-turn" onclick="endTurn()">End Turn</button>
             <div class="action-btn-secondary-group">
-                <button class="btn btn-primary btn-sm" onclick="openBuyPropertyModal()">Buy Property</button>
+                ${buyButton}
                 <button class="btn btn-secondary btn-sm" onclick="openIPOModal()">Create IPO</button>
                 <button class="btn btn-secondary btn-sm" onclick="openDebtModal()">Manage Debt</button>
                 <button class="btn btn-secondary btn-sm" onclick="openCorporationModal()">Corporations</button>
@@ -291,6 +352,12 @@ function renderActionButtons() {
             </div>
         </div>
     `;
+}
+
+function buyUnavailableLabel(landing) {
+    if (landing.detail.startsWith('Owned by')) return 'Property Owned';
+    if (landing.detail.startsWith('You already own')) return 'Already Yours';
+    return 'No Property to Buy';
 }
 
 // Format a game event into a human-readable string

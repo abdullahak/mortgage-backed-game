@@ -63,6 +63,7 @@ async function main() {
             PORT: String(apiPort),
             DB_PATH: dbPath,
             JWT_SECRET: process.env.JWT_SECRET || 'real-game-e2e-secret',
+            CORS_ORIGINS: '*',
             USESEND_URL: process.env.USESEND_URL || 'http://127.0.0.1:3001/api/v1/emails',
             ALLOW_STATE_REPAIR: 'true',
         },

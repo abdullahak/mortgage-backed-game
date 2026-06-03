@@ -57,6 +57,7 @@ test.describe('thorough real-player UI game flow', () => {
             await openTab(pages.Alice, 'Game');
             await clickAndWaitForGameVersion(pages.Alice, activeGameButton(pages.Alice, 'rollDiceAndMove()'));
             await expect(pages.Alice.locator('#gameContent')).toContainText(/rolled \d\+\d=/, { timeout: 10000 });
+            await expect(pages.Alice.locator('.landing-summary')).toBeVisible({ timeout: 10000 });
             await shot(testInfo, pages.Alice, '07-alice-roll-through-ui');
 
             await repairGameState(pages.Alice, { current: 'Alice', positions: { Alice: 1 }, unowned: ['prop-0'], diceRolled: { Alice: true } });
@@ -112,6 +113,7 @@ test.describe('thorough real-player UI game flow', () => {
             });
             await reloadGamePages(pages, ['Bob']);
             await rollWithDiceAndExpect(pages.Bob, [1, 2], /paid \$100 to the Bank for Luxury Tax/i);
+            await expectBuyUnavailable(pages.Bob, /No Property to Buy/i);
             await shot(testInfo, pages.Bob, '18-bob-pays-luxury-tax');
 
             await endTurnNoAssert(pages.Bob);
@@ -339,6 +341,12 @@ async function rollWithDiceAndExpect(page, dice, expectedText) {
     await page.evaluate(dice => { window.__E2E_NEXT_DICE = dice.slice(); }, dice);
     await clickAndWaitForGameVersion(page, activeGameButton(page, 'rollDiceAndMove()'));
     await expect(page.locator('#gameContent')).toContainText(expectedText, { timeout: 10000 });
+}
+
+async function expectBuyUnavailable(page, labelPattern) {
+    const buyButton = page.locator('#game.section.active .action-btn-buy');
+    await expect(buyButton).toBeDisabled({ timeout: 10000 });
+    await expect(buyButton).toContainText(labelPattern);
 }
 
 async function tradeCashForProperty(page, cashFrom, propertyFrom, cashAmount, propertyId) {
