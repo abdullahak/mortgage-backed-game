@@ -2,8 +2,8 @@
 const { test, expect } = require('@playwright/test');
 const { loginPage } = require('./helpers');
 
-const BASE = 'http://192.168.4.57';
-const BASE_API = `${BASE}/api`;
+const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
+const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
 
 /**
  * Helper to start a game with 2 players and navigate to game.html.
@@ -60,14 +60,14 @@ test.describe('Game flow', () => {
     test('game.html loads after navigating with game context', async ({ page }) => {
         await loginPage(page, setup.hostToken);
         await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
         await expect(page.locator('body')).toBeVisible();
     });
 
     test('player names appear on game page', async ({ page }) => {
         await loginPage(page, setup.hostToken);
         await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         await expect(page.locator('body')).toContainText('Alice', { timeout: 5000 });
     });
@@ -75,7 +75,7 @@ test.describe('Game flow', () => {
     test('board tab shows game board', async ({ page }) => {
         await loginPage(page, setup.hostToken);
         await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         // Click board tab if present
         const boardTab = page.locator('[role="tab"], button, a').filter({ hasText: /board/i }).first();
@@ -83,56 +83,43 @@ test.describe('Game flow', () => {
             await boardTab.click();
         }
 
-        // Board grid should be visible
-        const board = page.locator('.board-grid, [class*="board"], #board-tab').first();
-        if (await board.count() > 0) {
-            await expect(board).toBeVisible({ timeout: 5000 });
-        } else {
-            await expect(page.locator('body')).toBeVisible();
-        }
+        // Board grid should be visible. Scope to the rendered board content so
+        // hidden mobile/desktop duplicate markup does not satisfy the selector.
+        const board = page.locator('#boardContent .board-grid:visible, #boardContent .mobile-board-view:visible, #boardContent .board-tab-wrapper:visible').first();
+        await expect(board).toBeVisible({ timeout: 5000 });
     });
 
     test('current player can see Roll Dice button', async ({ page }) => {
         await loginPage(page, setup.hostToken);
         await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         // Navigate to board tab
         const boardTab = page.locator('[role="tab"], button, a').filter({ hasText: /board/i }).first();
         if (await boardTab.count() > 0) await boardTab.click();
 
         // Roll button should be visible for current player (Alice = player index 0)
-        const rollBtn = page.locator('button').filter({ hasText: /roll/i }).first();
+        const rollBtn = page.locator('button:visible').filter({ hasText: /roll/i }).first();
         await expect(rollBtn).toBeVisible({ timeout: 5000 });
     });
 
     test('non-current player does not see Roll Dice button', async ({ page }) => {
         await loginPage(page, setup.guestToken);
         await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         const boardTab = page.locator('[role="tab"], button, a').filter({ hasText: /board/i }).first();
         if (await boardTab.count() > 0) await boardTab.click();
 
         // Bob is player index 1, Alice is current (index 0)
-        const rollBtn = page.locator('button').filter({ hasText: /roll/i });
-        // Either not visible or not present
-        if (await rollBtn.count() > 0) {
-            // If a roll button exists, it should not be enabled for non-current player
-            // (implementation may hide or disable it)
-            await expect(rollBtn.first()).not.toBeVisible({ timeout: 2000 }).catch(() => {
-                // Acceptable if it's hidden
-            });
-        } else {
-            // No roll button — correct
-            expect(true).toBe(true);
-        }
+        const rollBtn = page.locator('button:visible').filter({ hasText: /roll/i });
+        await expect(rollBtn).toHaveCount(0, { timeout: 2000 });
     });
 
     test('game log tab shows event history', async ({ page }) => {
         await loginPage(page, setup.hostToken);
         await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         const logTab = page.locator('[role="tab"], button, a').filter({ hasText: /log|history|events/i }).first();
         if (await logTab.count() > 0) {
@@ -146,7 +133,7 @@ test.describe('Game flow', () => {
     test('player cash is displayed', async ({ page }) => {
         await loginPage(page, setup.hostToken);
         await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         // Should show starting cash (1500)
         await expect(page.locator('body')).toContainText('1500', { timeout: 5000 });
@@ -160,7 +147,7 @@ test.describe('Game flow — multiplayer real-time', () => {
         // Page 2 (guest) loads the game
         await loginPage(page, setup.guestToken);
         await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         // Both player names should be visible
         await expect(page.locator('body')).toContainText('Alice', { timeout: 5000 });

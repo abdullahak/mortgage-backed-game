@@ -1,216 +1,87 @@
-# Mortgage Backed Monopoly - Setup Instructions
+# Mortgage Backed Monopoly - Setup
 
-This guide will help you set up the multiplayer version of Mortgage Backed Monopoly with Supabase backend.
+The current live architecture is a static frontend plus an Express, Socket.IO, and SQLite backend. There is no build step for the frontend.
 
-## Prerequisites
+## Development
 
-- A Supabase account (free tier is fine)
-- Git installed on your computer
+Use dev-only ports and data paths. Do not use production port `80`, backend port `3010`, or production data directories for testing.
 
-## Step 1: Create a Supabase Project
-
-1. Go to [https://supabase.com](https://supabase.com) and sign up/login
-2. Click "New Project"
-3. Fill in your project details:
-   - Name: `mortgage-backed-game` (or your preferred name)
-   - Database Password: (generate a strong password and save it)
-   - Region: Choose the closest region to you
-4. Click "Create new project" and wait for it to finish setting up (takes about 2 minutes)
-
-## Step 2: Set Up the Database
-
-1. In your Supabase project dashboard, click on the **SQL Editor** in the left sidebar
-2. Click "New query"
-3. Copy the entire contents of `database-setup.sql` from this repository
-4. Paste it into the SQL editor
-5. Click "Run" to execute the SQL
-6. You should see a success message. This creates all the necessary tables and security policies.
-
-## Step 3: Configure Authentication
-
-1. In your Supabase dashboard, go to **Authentication** > **Providers**
-2. Make sure **Email** is enabled (it should be by default)
-3. Optional: Configure email templates
-   - Go to **Authentication** > **Email Templates**
-   - Customize the confirmation and password reset emails if desired
-
-## Step 4: Get Your Supabase Credentials
-
-1. In your Supabase dashboard, click on **Project Settings** (gear icon in sidebar)
-2. Click on **API** in the settings menu
-3. You'll see two important values:
-   - **Project URL** (looks like `https://xxxxx.supabase.co`)
-   - **anon/public** key (starts with `eyJhbGci...`)
-4. Keep this page open, you'll need these values in the next step
-
-## Step 5: Configure the Application
-
-1. Open the file `src/js/config.js` in your code editor
-2. Replace the placeholder values with your actual Supabase credentials:
-
-```javascript
-const SUPABASE_URL = 'https://your-project.supabase.co'; // Your Project URL
-const SUPABASE_ANON_KEY = 'your-anon-key-here'; // Your anon/public key
-```
-
-3. Save the file
-
-## Step 6: Test Locally (Optional but Recommended)
-
-1. Install a local web server if you don't have one:
-   ```bash
-   npm install -g http-server
-   ```
-
-2. Run the server from your project directory:
-   ```bash
-   http-server
-   ```
-
-3. Open your browser to `http://localhost:8080`
-4. Test the authentication flow:
-   - Sign up with a test email
-   - Check your email for the confirmation link (if email confirmation is enabled)
-   - Try logging in
-   - Create a test game room
-
-## Step 7: Deploy (Raspberry Pi / nginx)
-
-The site is served directly from the Raspberry Pi using nginx on port 8888.
-No build step is needed — it's a pure static site.
-
-**Initial setup (already done on Pi):**
 ```bash
-sudo apt-get install -y nginx
-sudo nano /etc/nginx/sites-available/mortgage-backed-game
-# (see config below)
-sudo ln -s /etc/nginx/sites-available/mortgage-backed-game /etc/nginx/sites-enabled/
-sudo systemctl enable nginx
-sudo systemctl start nginx
+mkdir -p /mnt/ssd/dev-data/mortgage-backed
+PORT=3111 \
+DB_PATH=/mnt/ssd/dev-data/mortgage-backed/game.db \
+JWT_SECRET=dev-secret-change-me \
+CORS_ORIGINS=http://100.110.102.49:3011,http://pi.taildb6607.ts.net:3011,http://localhost:3011 \
+npm --prefix backend run start
 ```
 
-**nginx config** (`/etc/nginx/sites-available/mortgage-backed-game`):
-```nginx
-server {
-    listen 8888;
-    server_name _;
+Serve the static frontend on the phone-facing dev port with dev API and Socket.IO proxying to `3111`:
 
-    root /home/abdlh/mortgage-backed-game;
-    index landing.html;
-
-    location / {
-        try_files $uri $uri/ =404;
-    }
-}
-```
-
-**After code changes:**
 ```bash
-# Just push/pull the files — no rebuild needed
-# If nginx config changes, reload it:
-sudo systemctl reload nginx
+PORT=3011 DEV_BACKEND_ORIGIN=http://127.0.0.1:3111 node scripts/dev-static-server.js
 ```
 
-**Access the site** from any device on the local network:
-- `http://192.168.4.57:8888`
+Phone test URLs:
 
-## Step 8: Test the Live Site
+- `http://100.110.102.49:3011`
+- `http://pi.taildb6607.ts.net:3011`
 
-1. Go to `http://192.168.4.57:8888` from a device on the local network
-2. Create an account
-3. Create a game room
-4. Copy the invite code
-5. Open an incognito window or another browser
-6. Sign up with a different account
-7. Join the game using the invite code
-8. Both windows should now show the waiting room
+## Production
 
-## Architecture Overview
+Production is served by nginx on public port `80` for `mortgage.abdlh.com`. nginx proxies `/api/` and `/socket.io/` to the backend on `127.0.0.1:3010`.
 
-### Pages
+Backend production configuration must include:
 
-- **auth.html** - Login and signup page
-- **lobby.html** - View and manage your game rooms
-- **waiting.html** - Wait for players to join before starting (to be created)
-- **game.html** - The actual game interface (to be created)
+```bash
+APP_ENV=production
+PORT=3010
+DB_PATH=/mnt/ssd/projects/mortgage-backed/backend/game.db
+JWT_SECRET=<long-random-secret>
+CORS_ORIGINS=https://mortgage.abdlh.com,http://mortgage.abdlh.com
+ALLOW_STATE_REPAIR=false
+LOG_OTPS=false
+```
 
-### Database Tables
+The backend refuses to start in production without an explicit `DB_PATH`, explicit CORS origins, and a non-default `JWT_SECRET`.
 
-- **rooms** - Game sessions with invite codes
-- **room_members** - Players in each room
-- **games** - Active game state (JSONB)
-- **game_events** - Transaction log of all game actions
+## Architecture
 
-### Real-time Features
+- Clients render state and submit actions.
+- The backend owns dice, rules, money movement, turn order, event logging, and state persistence.
+- Normal game mutation uses `POST /api/games/:id/actions`.
+- Direct whole-state patching is disabled unless `ALLOW_STATE_REPAIR=true`, and then only the host may use `host_state_repair`.
+- SQLite stores rooms, members, users, current game snapshots, append-only events, and idempotent action records.
 
-- Players joining/leaving rooms (via Supabase Realtime)
-- Game state updates (via Supabase Realtime)
-- Turn notifications
+## Backups
 
-## Supabase Dashboard Quick Links
+Run a daily SQLite backup, retaining 14 days by default:
 
-After setup, you can access these useful pages:
+```bash
+DB_PATH=/mnt/ssd/projects/mortgage-backed/backend/game.db \
+BACKUP_DIR=/mnt/ssd/backups/mortgage-backed \
+scripts/backup-db.sh
+```
 
-- **Table Editor**: View and edit data in your tables
-- **Authentication**: Manage users
-- **Database**: Run SQL queries
-- **Storage**: For future features (player avatars, etc.)
-- **Logs**: Debug issues
+Restore example:
 
-## Security
+```bash
+cp /mnt/ssd/backups/mortgage-backed/game-YYYYMMDDTHHMMSSZ.db /mnt/ssd/projects/mortgage-backed/backend/game.db
+```
 
-The database is protected by Row Level Security (RLS) policies that ensure:
-- Users can only see rooms they are members of
-- Only room hosts can start games
-- Players can only update game state for rooms they're in
-- All queries are automatically filtered by user authentication
+Stop the backend before restoring, then start it again.
 
-## Troubleshooting
+## Verification
 
-### "Invalid API key" error
-- Double-check that you copied the correct anon/public key from Supabase
-- Make sure there are no extra spaces or quotes
+Backend:
 
-### Email confirmation not received
-- Check your spam folder
-- In Supabase, go to Authentication > Settings and disable "Enable email confirmations" for testing
+```bash
+npm --prefix backend test -- --runInBand
+```
 
-### "Row Level Security policy violation"
-- Make sure you ran the complete `database-setup.sql` file
-- Check the Supabase logs for more details
-- If you previously ran an older version of `database-setup.sql` and are seeing RLS errors,
-  run `fix-rls-complete.sql` in the SQL Editor — it disables RLS, drops all old policies,
-  and recreates them without circular references
+E2E against dev ports:
 
-### Real-time updates not working
-- Make sure you have Realtime enabled in your Supabase project
-- Go to Database > Replication and enable replication for the tables
-
-## Next Steps
-
-The basic multiplayer infrastructure is now set up! Next features to implement:
-
-1. ✅ Authentication system
-2. ✅ Room creation and joining
-3. ⏳ Waiting room with real-time player list
-4. ⏳ Game start functionality
-5. ⏳ Multiplayer game board with state sync
-6. ⏳ Turn-based gameplay
-7. ⏳ Transaction history log
-
-## Support
-
-If you encounter any issues, check:
-1. Browser console for JavaScript errors
-2. Supabase logs (Database > Logs)
-3. Network tab in browser dev tools
-
-## Cost Estimates
-
-**Supabase Free Tier Includes:**
-- 500MB database
-- 2GB bandwidth
-- 50,000 monthly active users
-- Unlimited API requests
-
-This should be more than enough for personal use and testing with friends!
+```bash
+BASE_URL=http://100.110.102.49:3011 \
+API_BASE_URL=http://100.110.102.49:3111/api \
+npm run test:e2e
+```

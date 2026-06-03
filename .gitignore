@@ -32,3 +32,6 @@ backend/.env
 backend/game.db
 backend/game.db-shm
 backend/game.db-wal
+
+# Test artifacts
+test-results/

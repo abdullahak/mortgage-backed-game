@@ -2,8 +2,8 @@
 const { test, expect } = require('@playwright/test');
 const { loginPage } = require('./helpers');
 
-const BASE = 'http://192.168.4.57';
-const BASE_API = `${BASE}/api`;
+const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
+const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
 
 test.describe('Lobby', () => {
     let token, userId;
@@ -23,17 +23,17 @@ test.describe('Lobby', () => {
 
     test('lobby.html loads without error', async ({ page }) => {
         await expect(page.locator('body')).toBeVisible();
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
     });
 
     test('"Create New Game" button or link is present', async ({ page }) => {
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
         const createBtn = page.locator('button, a').filter({ hasText: /create|new game/i }).first();
         await expect(createBtn).toBeVisible({ timeout: 5000 });
     });
 
     test('create room modal appears on button click', async ({ page }) => {
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
         const createBtn = page.locator('button, a').filter({ hasText: /create|new game/i }).first();
         await createBtn.click();
 
@@ -44,7 +44,7 @@ test.describe('Lobby', () => {
     });
 
     test('submitting create form creates a room and shows it in the list', async ({ page }) => {
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         // Open create modal
         const createBtn = page.locator('button, a').filter({ hasText: /create|new game/i }).first();
@@ -56,16 +56,16 @@ test.describe('Lobby', () => {
         await nameInput.fill('E2E Test Room');
 
         // Fill in player name
-        const playerNameInput = page.locator('input[name="player_name"], input[placeholder*="player"], #player-name').first();
+        const playerNameInput = page.locator('input[name="player_name"], #host-player-name, #player-name, input[placeholder*="player"]').first();
         if (await playerNameInput.count() > 0) {
             await playerNameInput.fill('TestHost');
         }
 
         // Submit
-        const submitBtn = page.locator('button[type="submit"], button').filter({ hasText: /create|submit|start/i }).first();
+        const submitBtn = page.locator('#createRoomModal button').filter({ hasText: /create/i }).first();
         await submitBtn.click();
 
-        // Room should appear in list
+        // Successful creation redirects to the waiting room for the new game.
         await expect(page.locator('body')).toContainText('E2E Test Room', { timeout: 5000 });
     });
 
@@ -78,18 +78,21 @@ test.describe('Lobby', () => {
         const room = await roomRes.json();
 
         await page.reload();
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         // Should show invite code somewhere on the page
         await expect(page.locator('body')).toContainText(room.invite_code, { timeout: 5000 });
     });
 
     test('logout clears session', async ({ page }) => {
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         const logoutBtn = page.locator('button, a').filter({ hasText: /logout|sign out|log out/i }).first();
         if (await logoutBtn.count() > 0) {
-            await logoutBtn.click();
+            await Promise.all([
+                page.waitForURL(/index\.html|\/$/, { timeout: 5000 }).catch(() => {}),
+                logoutBtn.click(),
+            ]);
             const storedToken = await page.evaluate(() => localStorage.getItem('auth_token'));
             expect(storedToken).toBeFalsy();
         } else {

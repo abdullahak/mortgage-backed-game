@@ -2,8 +2,8 @@
 const { test, expect } = require('@playwright/test');
 const { loginPage } = require('./helpers');
 
-const BASE = 'http://192.168.4.57';
-const BASE_API = `${BASE}/api`;
+const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
+const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
 
 /**
  * Create a game where the current player is at a specific position.
@@ -67,7 +67,9 @@ test.describe('Game mechanics — via API state patching', () => {
         })).json();
 
         // Retrieve game and verify jail state
-        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`)).json();
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+        })).json();
         expect(fetched.game_state.players[0].inJail).toBe(true);
         expect(fetched.game_state.players[0].position).toBe(10);
     });
@@ -93,7 +95,9 @@ test.describe('Game mechanics — via API state patching', () => {
             data: { room_id: room.id, game_state: gameState },
         })).json();
 
-        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`)).json();
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+        })).json();
         expect(fetched.game_state.players[0].bankrupt).toBe(true);
         expect(fetched.game_state.players[0].cash).toBe(-100);
     });
@@ -122,7 +126,9 @@ test.describe('Game mechanics — via API state patching', () => {
             data: { room_id: room.id, game_state: gameState },
         })).json();
 
-        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`)).json();
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+        })).json();
         expect(fetched.game_state.properties[0].ownerId).toBe(h.user.id);
         expect(fetched.game_state.players[0].cash).toBe(1440);
     });
@@ -152,7 +158,9 @@ test.describe('Game mechanics — via API state patching', () => {
             data: { room_id: room.id, game_state: gameState },
         })).json();
 
-        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`)).json();
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+        })).json();
         expect(fetched.game_state.properties[0].houses).toBe(3);
         expect(fetched.game_state.properties[1].houses).toBe(3);
     });
@@ -186,12 +194,14 @@ test.describe('Game mechanics — via API state patching', () => {
 
         // End turn: advance to player index 1
         const updatedGs = { ...gameState, currentPlayerIndex: 1, players: gameState.players.map((p, i) => ({ ...p, diceRolled: false })) };
-        await request.patch(`${BASE_API}/games/${game.id}/state`, {
+        await request.post(`${BASE_API}/games/${game.id}/actions`, {
             headers: { Authorization: `Bearer ${h.token}` },
-            data: { game_state: updatedGs },
+            data: { actionId: `e2e-end-turn-${Date.now()}`, type: 'end_turn', payload: {}, expectedVersion: game.state_version },
         });
 
-        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`)).json();
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+        })).json();
         expect(fetched.game_state.currentPlayerIndex).toBe(1);
     });
 
@@ -219,7 +229,9 @@ test.describe('Game mechanics — via API state patching', () => {
             data: { room_id: room.id, game_state: gameState },
         })).json();
 
-        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`)).json();
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+        })).json();
         expect(fetched.game_state.debts).toHaveLength(1);
         expect(fetched.game_state.debts[0].principal).toBe(500);
     });
@@ -252,7 +264,7 @@ test.describe('Game mechanics — UI', () => {
 
         await loginPage(page, h.token);
         await page.goto(`${BASE}/game.html?room=${room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         // Check for IPO-related button (may not be visible on all tabs)
         const ipoBtn = page.locator('button, a').filter({ hasText: /ipo/i }).first();

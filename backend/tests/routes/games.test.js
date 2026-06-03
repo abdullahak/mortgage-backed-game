@@ -76,13 +76,14 @@ describe('POST /api/games', () => {
         expect(res.status).toBe(400);
     });
 
-    test('400 if game_state is missing', async () => {
+    test('creates default authoritative state if game_state is missing', async () => {
         const res = await request(app)
             .post('/api/games')
             .set('Authorization', `Bearer ${user1.token}`)
             .send({ room_id: room.id });
 
-        expect(res.status).toBe(400);
+        expect(res.status).toBe(200);
+        expect(res.body.game_state.players).toHaveLength(1);
     });
 
     test('403 if requester is not room host', async () => {
@@ -168,7 +169,9 @@ describe('GET /api/games/by-room/:roomId', () => {
     });
 
     test('200 returns game with parsed game_state', async () => {
-        const res = await request(app).get(`/api/games/by-room/${room.id}`);
+        const res = await request(app)
+            .get(`/api/games/by-room/${room.id}`)
+            .set('Authorization', `Bearer ${user1.token}`);
         expect(res.status).toBe(200);
         expect(typeof res.body.game_state).toBe('object');
     });
@@ -176,17 +179,21 @@ describe('GET /api/games/by-room/:roomId', () => {
     test('404 if no game for room', async () => {
         const { createRoomFixture } = require('../helpers/fixtures');
         const emptyRoom = createRoomFixture(db, user1.id, { inviteCode: 'EMPTY1' });
-        const res = await request(app).get(`/api/games/by-room/${emptyRoom.id}`);
+        const res = await request(app)
+            .get(`/api/games/by-room/${emptyRoom.id}`)
+            .set('Authorization', `Bearer ${user1.token}`);
         expect(res.status).toBe(404);
     });
 
-    test('no auth required', async () => {
+    test('auth required', async () => {
         const res = await request(app).get(`/api/games/by-room/${room.id}`);
-        expect(res.status).toBe(200);
+        expect(res.status).toBe(401);
     });
 
     test('returns correct room_id', async () => {
-        const res = await request(app).get(`/api/games/by-room/${room.id}`);
+        const res = await request(app)
+            .get(`/api/games/by-room/${room.id}`)
+            .set('Authorization', `Bearer ${user1.token}`);
         expect(res.body.room_id).toBe(room.id);
     });
 });
@@ -206,32 +213,38 @@ describe('GET /api/games/:id', () => {
     });
 
     test('200 returns game by ID', async () => {
-        const res = await request(app).get(`/api/games/${gameId}`);
+        const res = await request(app)
+            .get(`/api/games/${gameId}`)
+            .set('Authorization', `Bearer ${user1.token}`);
         expect(res.status).toBe(200);
         expect(res.body.id).toBe(gameId);
     });
 
     test('404 for non-existent game', async () => {
-        const res = await request(app).get('/api/games/nonexistent-id');
+        const res = await request(app)
+            .get('/api/games/nonexistent-id')
+            .set('Authorization', `Bearer ${user1.token}`);
         expect(res.status).toBe(404);
     });
 
-    test('no auth required', async () => {
+    test('auth required', async () => {
         const res = await request(app).get(`/api/games/${gameId}`);
-        expect(res.status).toBe(200);
+        expect(res.status).toBe(401);
     });
 
     test('game_state is parsed JSON object (not string)', async () => {
-        const res = await request(app).get(`/api/games/${gameId}`);
+        const res = await request(app)
+            .get(`/api/games/${gameId}`)
+            .set('Authorization', `Bearer ${user1.token}`);
         expect(typeof res.body.game_state).toBe('object');
         expect(typeof res.body.game_state).not.toBe('string');
     });
 });
 
 // ---------------------------------------------------------------------------
-// PATCH /api/games/:id/state
+// POST /api/games/:id/actions
 // ---------------------------------------------------------------------------
-describe('PATCH /api/games/:id/state', () => {
+describe('POST /api/games/:id/actions', () => {
     let gameId;
 
     beforeEach(async () => {
@@ -242,69 +255,72 @@ describe('PATCH /api/games/:id/state', () => {
         gameId = res.body.id;
     });
 
-    test('200 updates game_state', async () => {
-        const updatedGs = { ...minimalGameState(), currentPlayerIndex: 1 };
+    function actionPayload(type, payload = {}, expectedVersion = 0, actionId = uuidForTest()) {
+        return { actionId, type, payload, expectedVersion };
+    }
+
+    test('200 applies end_turn action', async () => {
         const res = await request(app)
-            .patch(`/api/games/${gameId}/state`)
+            .post(`/api/games/${gameId}/actions`)
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ game_state: updatedGs, action_type: 'turn_end', expected_version: 0 });
+            .send(actionPayload('end_turn'));
 
         expect(res.status).toBe(200);
-        expect(res.body.state_version).toBe(1);
+        expect(res.body.game.state_version).toBe(1);
+        expect(res.body.game.game_state.currentPlayerIndex).toBe(1);
     });
 
-    test('state persisted after update', async () => {
-        const updatedGs = { ...minimalGameState(), currentPlayerIndex: 1 };
+    test('state persisted after action', async () => {
         await request(app)
-            .patch(`/api/games/${gameId}/state`)
+            .post(`/api/games/${gameId}/actions`)
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ game_state: updatedGs, action_type: 'turn_end', expected_version: 0 });
+            .send(actionPayload('end_turn'));
 
         const game = db.prepare(`SELECT game_state FROM games WHERE id = ?`).get(gameId);
         const parsed = JSON.parse(game.game_state);
         expect(parsed.currentPlayerIndex).toBe(1);
     });
 
-    test('400 with missing game_state', async () => {
+    test('400 with missing actionId', async () => {
         const res = await request(app)
-            .patch(`/api/games/${gameId}/state`)
+            .post(`/api/games/${gameId}/actions`)
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ action_type: 'turn_end', expected_version: 0 });
+            .send({ type: 'end_turn', expectedVersion: 0 });
 
         expect(res.status).toBe(400);
     });
 
-    test('400 with missing action_type', async () => {
+    test('400 with missing type', async () => {
         const res = await request(app)
-            .patch(`/api/games/${gameId}/state`)
+            .post(`/api/games/${gameId}/actions`)
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ game_state: minimalGameState(), expected_version: 0 });
+            .send({ actionId: uuidForTest(), expectedVersion: 0 });
 
         expect(res.status).toBe(400);
     });
 
-    test('400 with missing expected_version', async () => {
+    test('400 with missing expectedVersion', async () => {
         const res = await request(app)
-            .patch(`/api/games/${gameId}/state`)
+            .post(`/api/games/${gameId}/actions`)
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ game_state: minimalGameState(), action_type: 'turn_end' });
+            .send({ actionId: uuidForTest(), type: 'end_turn' });
 
         expect(res.status).toBe(400);
     });
 
     test('401 without auth', async () => {
         const res = await request(app)
-            .patch(`/api/games/${gameId}/state`)
-            .send({ game_state: minimalGameState(), action_type: 'turn_end', expected_version: 0 });
+            .post(`/api/games/${gameId}/actions`)
+            .send(actionPayload('end_turn'));
 
         expect(res.status).toBe(401);
     });
 
     test('404 for non-existent game', async () => {
         const res = await request(app)
-            .patch('/api/games/nonexistent/state')
+            .post('/api/games/nonexistent/actions')
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ game_state: minimalGameState(), action_type: 'turn_end', expected_version: 0 });
+            .send(actionPayload('end_turn'));
 
         expect(res.status).toBe(404);
     });
@@ -314,56 +330,50 @@ describe('PATCH /api/games/:id/state', () => {
         const outsider = createUserFixture(db);
 
         const res = await request(app)
-            .patch(`/api/games/${gameId}/state`)
+            .post(`/api/games/${gameId}/actions`)
             .set('Authorization', `Bearer ${outsider.token}`)
-            .send({ game_state: { ...minimalGameState(), currentPlayerIndex: 1 }, action_type: 'turn_end', expected_version: 0 });
+            .send(actionPayload('end_turn'));
 
         expect(res.status).toBe(403);
     });
 
     test('409 with stale expected_version', async () => {
-        const updatedGs = { ...minimalGameState(), currentPlayerIndex: 1 };
         await request(app)
-            .patch(`/api/games/${gameId}/state`)
+            .post(`/api/games/${gameId}/actions`)
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ game_state: updatedGs, action_type: 'turn_end', expected_version: 0 });
+            .send(actionPayload('end_turn'));
 
-        const stale = { ...minimalGameState(), gameLog: [{ timestamp: new Date().toISOString(), message: 'stale' }] };
         const res = await request(app)
-            .patch(`/api/games/${gameId}/state`)
+            .post(`/api/games/${gameId}/actions`)
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ game_state: stale, action_type: 'transaction', expected_version: 0 });
+            .send(actionPayload('end_turn', {}, 0));
 
         expect(res.status).toBe(409);
     });
 
     test('403 when non-current player attempts turn action', async () => {
-        const updatedGs = { ...minimalGameState(), currentPlayerIndex: 1 };
         const res = await request(app)
-            .patch(`/api/games/${gameId}/state`)
+            .post(`/api/games/${gameId}/actions`)
             .set('Authorization', `Bearer ${user2.token}`)
-            .send({ game_state: updatedGs, action_type: 'turn_end', expected_version: 0 });
+            .send(actionPayload('end_turn'));
 
         expect(res.status).toBe(403);
     });
 
-    test('large valid game_state round-trips correctly', async () => {
-        const bigState = {
-            ...minimalGameState(),
-            gameLog: Array.from({ length: 250 }, (_, i) => ({
-                timestamp: new Date().toISOString(),
-                message: `event ${i}`,
-            })),
-        };
-
-        await request(app)
-            .patch(`/api/games/${gameId}/state`)
+    test('same actionId is idempotent', async () => {
+        const actionId = uuidForTest();
+        const first = await request(app)
+            .post(`/api/games/${gameId}/actions`)
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ game_state: bigState, action_type: 'transaction', expected_version: 0 });
+            .send(actionPayload('end_turn', {}, 0, actionId));
+        const second = await request(app)
+            .post(`/api/games/${gameId}/actions`)
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send(actionPayload('end_turn', {}, 0, actionId));
 
-        const game = db.prepare(`SELECT game_state FROM games WHERE id = ?`).get(gameId);
-        const parsed = JSON.parse(game.game_state);
-        expect(parsed.gameLog).toHaveLength(250);
+        expect(first.status).toBe(200);
+        expect(second.status).toBe(200);
+        expect(second.body.game.state_version).toBe(first.body.game.state_version);
     });
 });
 
@@ -458,14 +468,18 @@ describe('GET /api/games/:id/events', () => {
     });
 
     test('200 returns events array', async () => {
-        const res = await request(app).get(`/api/games/${gameId}/events`);
+        const res = await request(app)
+            .get(`/api/games/${gameId}/events`)
+            .set('Authorization', `Bearer ${user1.token}`);
         expect(res.status).toBe(200);
         expect(Array.isArray(res.body)).toBe(true);
     });
 
-    test('returns empty array if no events', async () => {
-        const res = await request(app).get(`/api/games/${gameId}/events`);
-        expect(res.body).toEqual([]);
+    test('returns game_started event after create', async () => {
+        const res = await request(app)
+            .get(`/api/games/${gameId}/events`)
+            .set('Authorization', `Bearer ${user1.token}`);
+        expect(res.body.some(event => event.event_type === 'game_started')).toBe(true);
     });
 
     test('event_data is parsed JSON', async () => {
@@ -473,13 +487,16 @@ describe('GET /api/games/:id/events', () => {
             .set('Authorization', `Bearer ${user1.token}`)
             .send({ event_type: 'buy', event_data: { property: 'prop-0', price: 60 } });
 
-        const res = await request(app).get(`/api/games/${gameId}/events`);
-        expect(res.body[0].event_data).toEqual({ property: 'prop-0', price: 60 });
+        const res = await request(app)
+            .get(`/api/games/${gameId}/events`)
+            .set('Authorization', `Bearer ${user1.token}`);
+        const event = res.body.find(row => row.event_type === 'buy');
+        expect(event.event_data).toEqual({ property: 'prop-0', price: 60 });
     });
 
-    test('no auth required to get events', async () => {
+    test('auth required to get events', async () => {
         const res = await request(app).get(`/api/games/${gameId}/events`);
-        expect(res.status).toBe(200);
+        expect(res.status).toBe(401);
     });
 });
 
@@ -498,7 +515,9 @@ describe('Game state integrity', () => {
             .set('Authorization', `Bearer ${user1.token}`)
             .send({ room_id: room.id, game_state: deepState });
 
-        const getRes = await request(app).get(`/api/games/${createRes.body.id}`);
+        const getRes = await request(app)
+            .get(`/api/games/${createRes.body.id}`)
+            .set('Authorization', `Bearer ${user1.token}`);
         expect(getRes.body.game_state.meta.nested.deeply.value).toBe(42);
         expect(getRes.body.game_state.meta.nested.deeply.arr).toEqual([1, 2, 3]);
     });
@@ -517,7 +536,13 @@ describe('Game state integrity', () => {
             .set('Authorization', `Bearer ${user1.token}`)
             .send({ room_id: unicodeRoom.id, game_state: unicodeState });
 
-        const getRes = await request(app).get(`/api/games/${createRes.body.id}`);
+        const getRes = await request(app)
+            .get(`/api/games/${createRes.body.id}`)
+            .set('Authorization', `Bearer ${user1.token}`);
         expect(getRes.body.game_state.players[0].name).toBe('日本語プレーヤー');
     });
 });
+
+function uuidForTest() {
+    return `test-${Math.random().toString(16).slice(2)}-${Date.now()}`;
+}

@@ -16,6 +16,10 @@ function getRoomWithMembers(roomId) {
     return { ...room, room_members: members };
 }
 
+function isRoomMember(roomId, userId) {
+    return !!db.prepare(`SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ?`).get(roomId, userId);
+}
+
 // POST /api/rooms — create room
 router.post('/', requireAuth, (req, res) => {
     const { name, max_players, player_name } = req.body;
@@ -25,12 +29,16 @@ router.post('/', requireAuth, (req, res) => {
 
     const roomId = uuidv4();
     const memberId = uuidv4();
-    const inviteCode = generateInviteCode();
+    const inviteCode = generateUniqueInviteCode();
+    const maxPlayers = Number(max_players || 4);
+    if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 8) {
+        return res.status(400).json({ error: 'max_players must be between 2 and 8' });
+    }
 
     db.prepare(`
         INSERT INTO rooms (id, invite_code, host_id, name, max_players)
         VALUES (?, ?, ?, ?, ?)
-    `).run(roomId, inviteCode, req.userId, name, max_players || 4);
+    `).run(roomId, inviteCode, req.userId, name, maxPlayers);
 
     db.prepare(`
         INSERT INTO room_members (id, room_id, user_id, player_name)
@@ -62,9 +70,10 @@ router.get('/mine', requireAuth, (req, res) => {
 });
 
 // GET /api/rooms/:id
-router.get('/:id', (req, res) => {
+router.get('/:id', requireAuth, (req, res) => {
     const room = getRoomWithMembers(req.params.id);
     if (!room) return res.status(404).json({ error: 'Room not found' });
+    if (!isRoomMember(room.id, req.userId)) return res.status(403).json({ error: 'Not a room member' });
     res.json(room);
 });
 
@@ -144,6 +153,15 @@ function generateInviteCode() {
         code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return code;
+}
+
+function generateUniqueInviteCode() {
+    for (let i = 0; i < 20; i++) {
+        const code = generateInviteCode();
+        const exists = db.prepare(`SELECT 1 FROM rooms WHERE invite_code = ?`).get(code);
+        if (!exists) return code;
+    }
+    throw new Error('Unable to generate unique invite code');
 }
 
     return router;

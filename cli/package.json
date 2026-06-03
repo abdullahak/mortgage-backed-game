@@ -1,0 +1,12 @@
+{
+  "name": "mortgage-backed-monopoly-cli",
+  "version": "1.0.0",
+  "description": "Interactive CLI for Mortgage Backed Monopoly",
+  "main": "play.js",
+  "scripts": {
+    "start": "node play.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.0.0"
+  }
+}

@@ -70,11 +70,16 @@ async function startHotseatGame() {
         });
         const roomId = room.id;
 
-        // 4. Mark room in_progress (skip the waiting room entirely)
-        await apiFetch(`/rooms/${roomId}/status`, {
-            method: 'PATCH',
-            body: JSON.stringify({ status: 'in_progress' })
-        });
+        // 4. Join every other local player to the room so server-authoritative
+        // actions work when the active hotseat token changes.
+        for (let i = 1; i < tokenRecords.length; i++) {
+            localStorage.setItem('auth_token', tokenRecords[i].token);
+            await apiFetch(`/rooms/${roomId}/join`, {
+                method: 'POST',
+                body: JSON.stringify({ player_name: tokenRecords[i].name })
+            });
+        }
+        localStorage.setItem('auth_token', tokenRecords[0].token);
 
         // 5. Build initial game state (mirrors startGameFromLobby in waiting.js)
         const initialGameState = {
@@ -120,19 +125,10 @@ async function startHotseatGame() {
             body: JSON.stringify({ room_id: roomId, game_state: initialGameState })
         });
 
-        // 7. Log game start event
-        await apiFetch(`/games/${game.id}/events`, {
-            method: 'POST',
-            body: JSON.stringify({
-                event_type: 'game_started',
-                event_data: { player_count: names.length, players: names, mode: 'hotseat' }
-            })
-        });
-
-        // 8. Store all player tokens in sessionStorage for game.js to pick up
+        // 7. Store all player tokens in sessionStorage for game.js to pick up
         sessionStorage.setItem('hotseat_tokens', JSON.stringify(tokenRecords));
 
-        // 9. Navigate to the game
+        // 8. Navigate to the game
         window.location.href = `game.html?room=${roomId}`;
 
     } catch (err) {

@@ -81,10 +81,9 @@ describe('Socket.io Connection', () => {
         client.disconnect();
     });
 
-    test('client connects with invalid token (still connects)', async () => {
+    test('client with invalid token is rejected', async () => {
         const client = makeClient('invalid-jwt-token');
-        await waitForConnect(client);
-        expect(client.connected).toBe(true);
+        await expect(waitForConnect(client)).rejects.toThrow();
         client.disconnect();
     });
 
@@ -211,7 +210,7 @@ describe('Room channel', () => {
 // game:state_update broadcasts
 // ---------------------------------------------------------------------------
 describe('game:state_update broadcasts', () => {
-    test('PATCH /api/games/:id/state updates DB and triggers game:state_update if subscribed', async () => {
+    test('POST /api/games/:id/actions updates DB and triggers game:state_update if subscribed', async () => {
         const { createUserFixture, createRoomFixture, buildGameState } = require('../helpers/fixtures');
         const { id: uid1, token: t1 } = createUserFixture(db);
         const { id: uid2, token: t2 } = createUserFixture(db);
@@ -239,9 +238,9 @@ describe('game:state_update broadcasts', () => {
 
         const updatedGs = { ...gs, currentPlayerIndex: 1 };
         await request(app)
-            .patch(`/api/games/${gameId}/state`)
+            .post(`/api/games/${gameId}/actions`)
             .set('Authorization', `Bearer ${t1}`)
-            .send({ game_state: updatedGs, action_type: 'turn_end', expected_version: 0 });
+            .send({ actionId: 'socket-action-1', type: 'end_turn', payload: {}, expectedVersion: 0 });
 
         await new Promise(r => setTimeout(r, 500));
 
@@ -280,9 +279,9 @@ describe('game:state_update broadcasts', () => {
         client.on('game:state_update', () => { receivedUpdate = true; });
 
         await request(app)
-            .patch(`/api/games/${gameId}/state`)
+            .post(`/api/games/${gameId}/actions`)
             .set('Authorization', `Bearer ${t1}`)
-            .send({ game_state: { ...gs, currentPlayerIndex: 1 }, action_type: 'turn_end', expected_version: 0 });
+            .send({ actionId: 'socket-action-2', type: 'end_turn', payload: {}, expectedVersion: 0 });
 
         await new Promise(r => setTimeout(r, 500));
         expect(receivedUpdate).toBe(false);

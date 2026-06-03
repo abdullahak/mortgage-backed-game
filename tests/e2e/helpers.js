@@ -2,7 +2,8 @@
  * E2E test helpers for mortgage-backed-game Playwright tests.
  */
 
-const BASE_API = 'http://192.168.4.57/api';
+const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
+const BASE_URL = process.env.BASE_URL || 'http://100.110.102.49:3011';
 
 /**
  * Create an authenticated user via the API and return {token, user}.
@@ -22,6 +23,9 @@ async function createAndLoginUser(request, email) {
  * Set the auth token in a page's localStorage and reload.
  */
 async function loginPage(page, token) {
+    if (page.url() === 'about:blank') {
+        await page.goto(BASE_URL);
+    }
     await page.evaluate((t) => localStorage.setItem('auth_token', t), token);
 }
 

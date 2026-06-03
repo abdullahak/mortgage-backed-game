@@ -15,7 +15,15 @@ async function apiFetch(path, options = {}) {
     });
     if (!res.ok) {
         const text = await res.text();
-        throw new Error(text || `HTTP ${res.status}`);
+        let message = text || `HTTP ${res.status}`;
+        try {
+            const parsed = JSON.parse(text);
+            message = parsed.error || message;
+        } catch {}
+        const err = new Error(message);
+        err.status = res.status;
+        err.responseText = text;
+        throw err;
     }
     return res.json();
 }
@@ -118,12 +126,6 @@ async function startGame(roomId, initialGameState) {
         body: JSON.stringify({ room_id: roomId, game_state: initialGameState })
     });
 
-    // Log game start event
-    await logGameEvent(game.id, 'game_started', {
-        player_count: room.room_members.length,
-        players: room.room_members.map(m => m.player_name)
-    });
-
     return game;
 }
 
@@ -189,14 +191,18 @@ function subscribeToRoom(roomId, onMemberChange, onStatusChange) {
 // Subscribe to game state updates
 function subscribeToGame(roomId, onGameUpdate) {
     const socket = getSocket();
-    socket.emit('join_room', roomId);
+    const join = () => socket.emit('join_room', roomId);
+    join();
 
     function gameHandler(game) { if (onGameUpdate) onGameUpdate(game); }
+    socket.on('connect', join);
     socket.on('game:state_update', gameHandler);
 
     return {
         unsubscribe() {
+            socket.off('connect', join);
             socket.off('game:state_update', gameHandler);
+            socket.emit('leave_room', roomId);
         }
     };
 }

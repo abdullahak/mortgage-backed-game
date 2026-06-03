@@ -113,24 +113,28 @@ async function loadGameData(roomId) {
 // Set up real-time subscriptions
 function setupRealtimeSubscriptions() {
     gameChannel = subscribeToGame(currentRoom.id, async (game) => {
-        currentGame = game;
-        const gameState = game.game_state;
-
-        // Update current player data
-        currentPlayerData = gameState.players.find(p => p.userId === currentUser.id);
-
-        // Re-render game state
-        renderGameState(gameState);
-
-        // Reload game log
-        await loadGameLog();
-
-        // Always re-render board so it stays in sync regardless of active tab
-        renderBoardTab();
-
-        // Refresh transaction dropdowns with latest player/property state
-        populatePlayerDropdowns();
+        await applyGameUpdate(game);
     });
+}
+
+async function applyGameUpdate(game, options = {}) {
+    if (!game || !game.game_state) return;
+    const incomingVersion = Number(game.state_version ?? game.stateVersion ?? 0);
+    const currentVersion = Number(currentGame?.state_version ?? currentGame?.stateVersion ?? -1);
+    if (!options.force && incomingVersion < currentVersion) return;
+
+    currentGame = game;
+    const gameState = game.game_state;
+    currentPlayerData = gameState.players.find(p => p.userId === currentUser.id);
+
+    renderGameState(gameState);
+    await loadGameLog();
+    renderBoardTab();
+    populatePlayerDropdowns();
+
+    if (gameState.ended) {
+        showWinnerFromState(gameState, gameState.gameLog.length ? gameState.gameLog[gameState.gameLog.length - 1].message : 'Game over');
+    }
 }
 
 // Render complete game state
@@ -233,7 +237,7 @@ function renderPlayerCard(player, isCurrentUser) {
         return `
             <div class="player-card current-user">
                 <div class="player-header">
-                    <h3>${player.name}</h3>
+                    <h3>${escapeHtml(player.name)}</h3>
                     <span class="badge">You</span>
                 </div>
                 ${cardDetails}
@@ -304,6 +308,10 @@ function formatLogEvent(type, data) {
             return `${data.payer} paid $${Number(data.amount).toFixed(2)} towards their debt`;
         case 'interest_accrual':
             return `${data.player} was charged $${Number(data.interestCharged).toFixed(2)} in interest`;
+        case 'forced_payment':
+            return `${data.from} paid $${Number(data.amount).toFixed(2)} to ${data.to}${data.reason ? ` for ${data.reason}` : ''}`;
+        case 'tax_payment':
+            return `${data.from} paid $${Number(data.amount).toFixed(2)} to ${data.to}${data.reason ? ` for ${data.reason}` : ''}`;
         case 'bankruptcy':
             return `${data.player} has gone BANKRUPT`;
         case 'turn_end':
@@ -337,8 +345,8 @@ async function loadGameLog() {
         const logContainer = document.getElementById('full-game-log');
         logContainer.innerHTML = events.map(event => `
             <div class="log-entry">
-                <span class="log-time">${new Date(event.created_at).toLocaleString()}</span>
-                <span class="log-message">${formatLogEvent(event.event_type, event.event_data)}</span>
+                <span class="log-time">${escapeHtml(new Date(event.created_at).toLocaleString())}</span>
+                <span class="log-message">${escapeHtml(formatLogEvent(event.event_type, event.event_data))}</span>
             </div>
         `).join('');
 
@@ -374,7 +382,7 @@ async function openBuyPropertyModal() {
     const propertiesHtml = `
         <div class="property-card selected" onclick="selectProperty('${property.id}')" data-property-id="${property.id}">
             <div class="property-color" style="background-color: ${property.color}"></div>
-            <div class="property-name">${property.name}</div>
+            <div class="property-name">${escapeHtml(property.name)}</div>
             <div class="property-price">$${property.price}</div>
         </div>
     `;
@@ -421,42 +429,7 @@ async function confirmPurchase() {
     const purchasePrice = property.price;
 
     try {
-        const gameState = currentGame.game_state;
-        const property = gameState.properties.find(p => p.id === selectedPropertyId);
-
-        if (currentPlayerData.cash < purchasePrice) {
-            alert('Insufficient funds');
-            return;
-        }
-
-        // Update game state
-        property.ownerId = currentUser.id;
-        property.ownerName = currentPlayerData.name;
-
-        currentPlayerData.cash -= purchasePrice;
-        currentPlayerData.properties.push({
-            id: property.id,
-            name: property.name,
-            color: property.color,
-            value: purchasePrice
-        });
-
-        gameState.gameLog.push({
-            timestamp: new Date().toISOString(),
-            message: `${currentPlayerData.name} purchased ${property.name} for $${purchasePrice.toFixed(2)}`
-        });
-
-        // Update database
-        await updateGameState(gameState, 'property_purchase');
-        renderGameState(currentGame.game_state);
-
-        // Log event
-        await logGameEvent('property_purchase', {
-            property: property.name,
-            buyer: currentPlayerData.name,
-            price: purchasePrice
-        });
-
+        await performGameAction('buy_property', {});
         closeModal('buyPropertyModal');
         selectedPropertyId = null;
 
@@ -471,7 +444,7 @@ async function openIPOModal() {
     const assetsHtml = currentPlayerData.properties.map(p => `
         <div class="asset-checkbox">
             <input type="checkbox" id="ipo-asset-${p.id}" value="${p.id}">
-            <label for="ipo-asset-${p.id}">${p.name} ($${p.value})</label>
+            <label for="ipo-asset-${p.id}">${escapeHtml(p.name)} ($${p.value})</label>
         </div>
     `).join('');
 
@@ -498,66 +471,12 @@ async function createIPO() {
     }
 
     try {
-        const gameState = currentGame.game_state;
-
-        // Create corporation
-        const corporation = {
-            id: `corp-${Date.now()}`,
-            ticker: ticker,
-            name: `${ticker} Corporation`,
-            founderId: currentUser.id,
-            founderName: currentPlayerData.name,
+        await performGameAction('create_ipo', {
+            ticker,
             totalShares: numShares,
-            pricePerShare: pricePerShare,
-            assets: selectedAssets,
-            shareholders: [],
-            founderShares: numShares,
-            availableShares: numShares,
-            founderHoldings: [{
-                userId: currentUser.id,
-                name: currentPlayerData.name,
-                shares: numShares
-            }]
-        };
-
-        gameState.corporations.push(corporation);
-
-        // Remove assets from player's properties and clear ownership in master list
-        selectedAssets.forEach(asset => {
-            const index = currentPlayerData.properties.findIndex(p => p.id === asset.id);
-            if (index !== -1) {
-                currentPlayerData.properties.splice(index, 1);
-            }
-            // Clear ownerId so the board/rent logic no longer treats this as player-owned
-            const masterProp = gameState.properties.find(p => p.id === asset.id);
-            if (masterProp) {
-                masterProp.ownerId = corporation.id;
-                masterProp.ownerName = `[${ticker}]`;
-            }
+            pricePerShare,
+            assetIds: selectedAssets.map(asset => asset.id),
         });
-
-        // Add corporation to player
-        currentPlayerData.corporations.push({
-            ticker: ticker,
-            sharesOwned: 0,
-            totalShares: numShares
-        });
-
-        gameState.gameLog.push({
-            timestamp: new Date().toISOString(),
-            message: `${currentPlayerData.name} created ${ticker} IPO with ${numShares} shares at $${pricePerShare} each`
-        });
-
-        // Update database
-        await updateGameState(gameState, 'ipo_created');
-        renderGameState(currentGame.game_state);
-        await logGameEvent('ipo_created', {
-            ticker: ticker,
-            founder: currentPlayerData.name,
-            shares: numShares,
-            pricePerShare: pricePerShare
-        });
-
         closeModal('ipoModal');
 
     } catch (error) {
@@ -572,7 +491,7 @@ async function openDebtModal() {
     const assetsHtml = currentPlayerData.properties.map(p => `
         <div class="asset-checkbox">
             <input type="checkbox" id="collateral-${p.id}" value="${p.id}">
-            <label for="collateral-${p.id}">${p.name} ($${p.value})</label>
+            <label for="collateral-${p.id}">${escapeHtml(p.name)} ($${p.value})</label>
         </div>
     `).join('');
 
@@ -622,32 +541,11 @@ async function issueDebt() {
     }
 
     try {
-        const gameState = currentGame.game_state;
-
-        const debt = {
-            id: `debt-${Date.now()}`,
-            principal: loanAmount,
-            interestRate: interestRate,
-            collateral: selectedCollateral,
-            issueDate: new Date().toISOString()
-        };
-
-        currentPlayerData.debts.push(debt);
-        currentPlayerData.cash += loanAmount;
-
-        gameState.gameLog.push({
-            timestamp: new Date().toISOString(),
-            message: `${currentPlayerData.name} issued debt: $${loanAmount.toFixed(2)} @ ${interestRate}%`
-        });
-
-        await updateGameState(gameState, 'debt_issued');
-        renderGameState(currentGame.game_state);
-        await logGameEvent('debt_issued', {
-            issuer: currentPlayerData.name,
+        await performGameAction('issue_debt', {
             amount: loanAmount,
-            interestRate: interestRate
+            interestRate,
+            collateralIds: selectedCollateral.map(asset => asset.id),
         });
-
         closeModal('debtModal');
 
     } catch (error) {
@@ -671,32 +569,12 @@ async function settleDebt() {
     }
 
     try {
-        const gameState = currentGame.game_state;
         const debt = currentPlayerData.debts[debtIndex];
-
-        currentPlayerData.cash -= paymentAmount;
-        debt.principal -= paymentAmount;
-
-        if (debt.principal <= 0) {
-            currentPlayerData.debts.splice(debtIndex, 1);
-            gameState.gameLog.push({
-                timestamp: new Date().toISOString(),
-                message: `${currentPlayerData.name} fully settled debt`
-            });
-        } else {
-            gameState.gameLog.push({
-                timestamp: new Date().toISOString(),
-                message: `${currentPlayerData.name} paid $${paymentAmount.toFixed(2)} towards debt`
-            });
-        }
-
-        await updateGameState(gameState, 'debt_payment');
-        renderGameState(currentGame.game_state);
-        await logGameEvent('debt_payment', {
-            payer: currentPlayerData.name,
-            amount: paymentAmount
+        await performGameAction('pay_debt', {
+            debtId: debt && debt.id,
+            debtIndex,
+            amount: paymentAmount,
         });
-
         closeModal('debtModal');
 
     } catch (error) {
@@ -720,16 +598,16 @@ async function openCorporationModal() {
 
         return `
         <div class="corporation-card">
-            <h3>${corp.ticker} - ${corp.name}</h3>
-            <p>Founder: ${corp.founderName}</p>
+            <h3>${escapeHtml(corp.ticker)} - ${escapeHtml(corp.name)}</h3>
+            <p>Founder: ${escapeHtml(corp.founderName)}</p>
             <p>Total Shares: ${corp.totalShares} | Available: ${sharesAvailable} | Price: $${corp.pricePerShare.toFixed(2)}/share</p>
             <h4>Assets:</h4>
             <ul>
-                ${corp.assets.map(a => `<li>${a.name} ($${a.value})</li>`).join('')}
+                ${corp.assets.map(a => `<li>${escapeHtml(a.name)} ($${a.value})</li>`).join('')}
             </ul>
             <h4>Shareholders:</h4>
             <ul>
-                ${corp.shareholders.map(s => `<li>${s.name}: ${s.shares} shares</li>`).join('')}
+                ${corp.shareholders.map(s => `<li>${escapeHtml(s.name)}: ${s.shares} shares</li>`).join('')}
             </ul>
             ${myShares ? `<p><strong>Your shares:</strong> ${myShares.shares}</p>` : ''}
             ${canBuy ? `
@@ -769,44 +647,7 @@ async function buyShares(corpId) {
     }
 
     try {
-        // Deduct from buyer
-        currentPlayerData.cash -= totalCost;
-
-        // Pay founder
-        const founder = gameState.players.find(p => p.userId === corp.founderId);
-        if (founder) founder.cash += totalCost;
-
-        // Update shareholder ledger
-        const existing = corp.shareholders.find(s => s.userId === currentUser.id);
-        if (existing) {
-            existing.shares += numShares;
-        } else {
-            corp.shareholders.push({ userId: currentUser.id, name: currentPlayerData.name, shares: numShares });
-        }
-        corp.availableShares = Math.max(0, (typeof corp.availableShares === 'number' ? corp.availableShares : sharesAvailable) - numShares);
-
-        // Update buyer's corporation list
-        const myCorpEntry = currentPlayerData.corporations.find(c => c.ticker === corp.ticker);
-        if (myCorpEntry) {
-            myCorpEntry.sharesOwned += numShares;
-        } else {
-            currentPlayerData.corporations.push({ ticker: corp.ticker, sharesOwned: numShares, totalShares: corp.totalShares, pricePerShare: corp.pricePerShare });
-        }
-
-        gameState.gameLog.push({
-            timestamp: new Date().toISOString(),
-            message: `${currentPlayerData.name} bought ${numShares} share(s) of ${corp.ticker} for $${totalCost.toFixed(2)}`
-        });
-
-        await updateGameState(gameState, 'share_purchase');
-        renderGameState(currentGame.game_state);
-        await logGameEvent('share_purchase', {
-            buyer: currentPlayerData.name,
-            ticker: corp.ticker,
-            shares: numShares,
-            totalCost
-        });
-
+        await performGameAction('buy_shares', { corpId, shares: numShares });
         closeModal('corporationModal');
 
     } catch (error) {
@@ -818,90 +659,17 @@ async function buyShares(corpId) {
 // End turn
 async function endTurn() {
     try {
+        const beforeUserId = currentUser.id;
+        await performGameAction('end_turn', {});
         const gameState = currentGame.game_state;
-
-        // --- Board: warn if dice not rolled (unless first turn at GO) ---
-        if (currentPlayerData && !currentPlayerData.diceRolled && (currentPlayerData.position || 0) !== 0) {
-            gameState.gameLog.push({
-                timestamp: new Date().toISOString(),
-                message: `Note: ${currentPlayerData.name} ended their turn without rolling the dice.`
-            });
-        }
-
-        // --- Board: reset turn fields ---
-        if (currentPlayerData) {
-            currentPlayerData.diceRolled = false;
-            currentPlayerData.doubleCount = 0;
-        }
-
-        // --- Interest accrual ---
-        let totalInterest = 0;
-        currentPlayerData.debts.forEach(debt => {
-            const interest = debt.principal * (debt.interestRate / 100);
-            debt.principal += interest;
-            totalInterest += interest;
-        });
-
-        if (totalInterest > 0) {
-            currentPlayerData.cash -= totalInterest;
-            gameState.gameLog.push({
-                timestamp: new Date().toISOString(),
-                message: `${currentPlayerData.name} was charged $${totalInterest.toFixed(2)} in interest.`
-            });
-            await logGameEvent('interest_accrual', {
-                player: currentPlayerData.name,
-                interestCharged: totalInterest
-            });
-        }
-
-        // --- Bankruptcy detection ---
-        if (currentPlayerData.cash < 0 && !currentPlayerData.bankrupt) {
-            currentPlayerData.bankrupt = true;
-            gameState.gameLog.push({
-                timestamp: new Date().toISOString(),
-                message: `${currentPlayerData.name} has gone BANKRUPT!`
-            });
-            await logGameEvent('bankruptcy', { player: currentPlayerData.name });
-        }
-
-        // --- Advance to next non-bankrupt player ---
-        const totalPlayers = gameState.players.length;
-        let nextIndex = (gameState.currentPlayerIndex + 1) % totalPlayers;
-        let safetyCounter = 0;
-        while (gameState.players[nextIndex].bankrupt && safetyCounter < totalPlayers) {
-            nextIndex = (nextIndex + 1) % totalPlayers;
-            safetyCounter++;
-        }
-        gameState.currentPlayerIndex = nextIndex;
-        const nextPlayer = gameState.players[nextIndex];
-        nextPlayer.diceRolled = false;
-        gameState.lastDiceRoll = null;
-
-        gameState.gameLog.push({
-            timestamp: new Date().toISOString(),
-            message: `${currentPlayerData.name} ended their turn. It's now ${nextPlayer.name}'s turn.`
-        });
-
-        await updateGameState(gameState, 'turn_end');
-        renderGameState(currentGame.game_state);
-        await logGameEvent('turn_end', {
-            player: currentPlayerData.name,
-            nextPlayer: nextPlayer.name
-        });
-
-        // --- Win condition ---
-        const activePlayers = gameState.players.filter(p => !p.bankrupt);
-        if (activePlayers.length <= 1) {
-            if (isHotseatMode) sessionStorage.removeItem('hotseat_tokens');
-            const reason = activePlayers.length === 1
-                ? activePlayers[0].name + ' wins — last player standing!'
-                : 'Everyone went bankrupt — it\'s a draw!';
-            await triggerEndGame(gameState, reason);
+        const nextPlayer = gameState.players[gameState.currentPlayerIndex];
+        if (gameState.ended) {
+            showWinnerFromState(gameState, gameState.gameLog.length ? gameState.gameLog[gameState.gameLog.length - 1].message : 'Game over');
             return;
         }
 
         // --- Hotseat: show pass-device screen before next player takes over ---
-        if (isHotseatMode) {
+        if (isHotseatMode && nextPlayer && nextPlayer.userId !== beforeUserId) {
             showHotseatInterstitial(nextPlayer.name);
         }
 
@@ -942,42 +710,8 @@ function dismissHotseatInterstitial() {
 // End Game - compute net worth and show winner screen
 async function triggerEndGame(gameState, reason) {
     try {
-        // Compute net worth for each player
-        const standings = gameState.players.map(player => {
-            const propertyValue = player.properties.reduce((sum, p) => sum + (p.value || 0), 0);
-            const corpValue = (player.corporations || []).reduce((sum, c) => sum + (c.sharesOwned * (c.pricePerShare || 0)), 0);
-            const debtTotal = player.debts.reduce((sum, d) => sum + d.principal, 0);
-            const netWorth = player.cash + propertyValue + corpValue - debtTotal;
-            return { name: player.name, cash: player.cash, propertyValue, corpValue, debtTotal, netWorth, bankrupt: player.bankrupt };
-        });
-
-        standings.sort((a, b) => b.netWorth - a.netWorth);
-
-        // Update room status to completed
-        await apiFetch(`/rooms/${currentRoom.id}/status`, {
-            method: 'PATCH',
-            body: JSON.stringify({ status: 'completed' })
-        });
-
-        await logGameEvent('game_ended', { reason, standings });
-
-        // Clear hotseat session on game over
-        if (isHotseatMode) sessionStorage.removeItem('hotseat_tokens');
-
-        // Show winner modal
-        const winner = standings[0];
-        const standingsHtml = standings.map((p, i) => `
-            <div class="standings-row ${p.bankrupt ? 'bankrupt' : ''}">
-                <span class="rank">#${i + 1}</span>
-                <span class="player-name">${p.name}${p.bankrupt ? ' (bankrupt)' : ''}</span>
-                <span class="net-worth">$${p.netWorth.toFixed(2)}</span>
-            </div>
-        `).join('');
-
-        document.getElementById('winnerName').textContent = winner.name;
-        document.getElementById('winnerReason').textContent = reason || '';
-        document.getElementById('finalStandings').innerHTML = standingsHtml;
-        document.getElementById('winnerModal').style.display = 'flex';
+        await performGameAction('host_end_game', {});
+        showWinnerFromState(currentGame.game_state, reason);
 
     } catch (error) {
         console.error('Error ending game:', error);
@@ -992,19 +726,61 @@ async function hostEndGame() {
     await triggerEndGame(gameState, 'Host ended the game.');
 }
 
-// Update game state in database
-async function updateGameState(gameState, actionType) {
-    const updatedGame = await apiFetch(`/games/${currentGame.id}/state`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-            game_state: gameState,
-            action_type: actionType,
-            expected_version: currentGame.state_version
-        })
-    });
-    currentGame = updatedGame;
+async function performGameAction(type, payload = {}) {
+    try {
+        const result = await apiFetch(`/games/${currentGame.id}/actions`, {
+            method: 'POST',
+            body: JSON.stringify({
+                actionId: makeActionId(),
+                type,
+                payload,
+                expectedVersion: currentGame.state_version
+            })
+        });
+        await applyGameUpdate(result.game, { force: true });
+        return result;
+    } catch (error) {
+        if (error.status === 409) {
+            await refreshCurrentGame();
+            alert('The game changed before your action was saved. Review the latest state and try again.');
+            return null;
+        }
+        throw error;
+    }
+}
+
+async function refreshCurrentGame() {
+    if (!currentRoom) return;
+    currentGame = await getGameByRoomId(currentRoom.id);
     currentPlayerData = currentGame.game_state.players.find(p => p.userId === currentUser.id);
-    return updatedGame;
+    renderGameState(currentGame.game_state);
+    renderBoardTab();
+}
+
+function makeActionId() {
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+    return `action-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function showWinnerFromState(gameState, reason) {
+    const standings = gameState.standings || gameState.players.map(player => ({
+        name: player.name,
+        netWorth: player.netWorth || player.cash,
+        bankrupt: player.bankrupt
+    })).sort((a, b) => b.netWorth - a.netWorth);
+    if (isHotseatMode) sessionStorage.removeItem('hotseat_tokens');
+    const winner = standings[0];
+    const standingsHtml = standings.map((p, i) => `
+        <div class="standings-row ${p.bankrupt ? 'bankrupt' : ''}">
+            <span class="rank">#${i + 1}</span>
+            <span class="player-name">${escapeHtml(p.name)}${p.bankrupt ? ' (bankrupt)' : ''}</span>
+            <span class="net-worth">$${Number(p.netWorth || 0).toFixed(2)}</span>
+        </div>
+    `).join('');
+    document.getElementById('winnerName').textContent = winner ? winner.name : 'Game Over';
+    document.getElementById('winnerReason').textContent = reason || '';
+    document.getElementById('finalStandings').innerHTML = standingsHtml;
+    document.getElementById('winnerModal').style.display = 'flex';
 }
 
 // Log game event
@@ -1076,7 +852,7 @@ function populatePlayerDropdowns() {
     const paymentToPlayer = document.getElementById('paymentToPlayer');
 
     const playersHtml = gameState.players.map(p =>
-        `<option value="${p.userId}">${p.name}</option>`
+        `<option value="${escapeHtml(p.userId)}">${escapeHtml(p.name)}</option>`
     ).join('');
 
     player1Select.innerHTML = playersHtml;
@@ -1084,9 +860,14 @@ function populatePlayerDropdowns() {
     paymentFromPlayer.innerHTML = playersHtml;
     paymentToPlayer.innerHTML = playersHtml;
 
-    // Add event listeners for player selection
-    player1Select.addEventListener('change', () => updatePlayerAssets('player1'));
-    player2Select.addEventListener('change', () => updatePlayerAssets('player2'));
+    if (!player1Select.dataset.assetsBound) {
+        player1Select.addEventListener('change', () => updatePlayerAssets('player1'));
+        player1Select.dataset.assetsBound = 'true';
+    }
+    if (!player2Select.dataset.assetsBound) {
+        player2Select.addEventListener('change', () => updatePlayerAssets('player2'));
+        player2Select.dataset.assetsBound = 'true';
+    }
 }
 
 function updatePlayerAssets(playerNumber) {
@@ -1102,7 +883,7 @@ function updatePlayerAssets(playerNumber) {
     const assetsHtml = player.properties.map(p => `
         <div class="asset-checkbox">
             <input type="checkbox" id="${playerNumber}-asset-${p.id}" value="${p.id}">
-            <label for="${playerNumber}-asset-${p.id}">${p.name} ($${p.value})</label>
+            <label for="${playerNumber}-asset-${p.id}">${escapeHtml(p.name)} ($${p.value})</label>
         </div>
     `).join('');
 
@@ -1121,64 +902,14 @@ async function executeTransaction() {
         .map(cb => cb.value);
 
     try {
-        const gameState = currentGame.game_state;
-        const player1 = gameState.players.find(p => p.userId === player1Id);
-        const player2 = gameState.players.find(p => p.userId === player2Id);
-
-        // Transfer cash
-        player1.cash -= player1Cash;
-        player1.cash += player2Cash;
-        player2.cash -= player2Cash;
-        player2.cash += player1Cash;
-
-        // Transfer assets from player1 to player2
-        player1Assets.forEach(assetId => {
-            const assetIndex = player1.properties.findIndex(p => p.id === assetId);
-            if (assetIndex !== -1) {
-                const asset = player1.properties.splice(assetIndex, 1)[0];
-                player2.properties.push(asset);
-
-                // Update property ownership in game state
-                const property = gameState.properties.find(p => p.id === assetId);
-                if (property) {
-                    property.ownerId = player2Id;
-                    property.ownerName = player2.name;
-                }
-            }
-        });
-
-        // Transfer assets from player2 to player1
-        player2Assets.forEach(assetId => {
-            const assetIndex = player2.properties.findIndex(p => p.id === assetId);
-            if (assetIndex !== -1) {
-                const asset = player2.properties.splice(assetIndex, 1)[0];
-                player1.properties.push(asset);
-
-                // Update property ownership in game state
-                const property = gameState.properties.find(p => p.id === assetId);
-                if (property) {
-                    property.ownerId = player1Id;
-                    property.ownerName = player1.name;
-                }
-            }
-        });
-
-        gameState.gameLog.push({
-            timestamp: new Date().toISOString(),
-            message: `Transaction: ${player1.name} ↔ ${player2.name} ($${player1Cash} + ${player1Assets.length} assets ↔ $${player2Cash} + ${player2Assets.length} assets)`
-        });
-
-        await updateGameState(gameState, 'transaction');
-        renderGameState(currentGame.game_state);
-        await logGameEvent('transaction', {
-            player1: player1.name,
-            player2: player2.name,
+        await performGameAction('trade', {
+            player1Id,
+            player2Id,
             player1Cash,
             player2Cash,
-            player1Assets: player1Assets.length,
-            player2Assets: player2Assets.length
+            player1AssetIds: player1Assets,
+            player2AssetIds: player2Assets,
         });
-
         alert('Transaction completed successfully');
 
         // Reset form
@@ -1204,31 +935,7 @@ async function makePayment() {
     }
 
     try {
-        const gameState = currentGame.game_state;
-        const fromPlayer = gameState.players.find(p => p.userId === fromPlayerId);
-        const toPlayer = gameState.players.find(p => p.userId === toPlayerId);
-
-        if (fromPlayer.cash < amount) {
-            alert('Insufficient funds');
-            return;
-        }
-
-        fromPlayer.cash -= amount;
-        toPlayer.cash += amount;
-
-        gameState.gameLog.push({
-            timestamp: new Date().toISOString(),
-            message: `${fromPlayer.name} paid $${amount.toFixed(2)} to ${toPlayer.name}`
-        });
-
-        await updateGameState(gameState, 'manual_payment');
-        renderGameState(currentGame.game_state);
-        await logGameEvent('payment', {
-            from: fromPlayer.name,
-            to: toPlayer.name,
-            amount: amount
-        });
-
+        await performGameAction('manual_payment', { fromPlayerId, toPlayerId, amount });
         alert('Payment completed successfully');
         document.getElementById('paymentAmount').value = '';
 
@@ -1277,119 +984,15 @@ function renderBoardTab() {
 // ---------------------------------------------------------------
 async function rollDiceAndMove() {
     if (!currentGame || !currentUser) return;
-
-    const gameState = currentGame.game_state;
-    const player = gameState.players[gameState.currentPlayerIndex];
-
-    if (!player || player.userId !== currentUser.id) {
-        showToast('It is not your turn!');
-        return;
+    try {
+        const payload = Array.isArray(window.__E2E_NEXT_DICE)
+            ? { testDice: window.__E2E_NEXT_DICE.splice(0, 2) }
+            : {};
+        await performGameAction('roll_dice', payload);
+    } catch (error) {
+        console.error('Error rolling dice:', error);
+        alert(error.message || 'Failed to roll dice');
     }
-    if (player.diceRolled) {
-        showToast('You have already rolled this turn.');
-        return;
-    }
-
-    const die1 = Math.floor(Math.random() * 6) + 1;
-    const die2 = Math.floor(Math.random() * 6) + 1;
-    const total = die1 + die2;
-    const isDoubles = die1 === die2;
-
-    gameState.lastDiceRoll = [die1, die2];
-
-    if (isDoubles) {
-        player.doubleCount = (player.doubleCount || 0) + 1;
-        if (player.doubleCount >= 3) {
-            // Three consecutive doubles → jail
-            player.inJail = true;
-            player.position = 10;
-            player.doubleCount = 0;
-            player.diceRolled = true;
-            gameState.gameLog.push({
-                timestamp: new Date().toISOString(),
-                message: `${player.name} rolled doubles 3 times — sent to Jail!`
-            });
-            await updateGameState(gameState, 'dice_roll');
-            currentPlayerData = gameState.players.find(p => p.userId === currentUser.id);
-            renderBoardTab();
-            return;
-        }
-    } else {
-        player.doubleCount = 0;
-    }
-
-    // Jail handling
-    if (player.inJail) {
-        if (isDoubles) {
-            player.inJail = false;
-            player.jailTurns = 0;
-            showToast('Rolled doubles — released from Jail!');
-        } else {
-            player.jailTurns = (player.jailTurns || 0) + 1;
-            if (player.jailTurns >= 3) {
-                // Forced buy-out after 3 turns
-                player.cash -= 50;
-                player.inJail = false;
-                player.jailTurns = 0;
-                showToast('Paid $50 bail — released from Jail.');
-            } else {
-                player.diceRolled = true;
-                gameState.gameLog.push({
-                    timestamp: new Date().toISOString(),
-                    message: `${player.name} is in Jail (turn ${player.jailTurns}/3). Rolled ${die1}+${die2}.`
-                });
-                await updateGameState(gameState, 'dice_roll');
-                currentPlayerData = gameState.players.find(p => p.userId === currentUser.id);
-                renderBoardTab();
-                return;
-            }
-        }
-    }
-
-    // Move
-    const oldPos = player.position || 0;
-    const newPos = (oldPos + total) % 40;
-
-    // Detect passing GO (only when not about to be sent to jail by card/square)
-    const passGoAmount = gameState.settings.passGoAmount || 200;
-    if (newPos < oldPos) {
-        player.cash += passGoAmount;
-        gameState.gameLog.push({
-            timestamp: new Date().toISOString(),
-            message: `${player.name} passed GO — collected $${passGoAmount}!`
-        });
-        await logGameEvent('pass_go', { player: player.name, amount: passGoAmount });
-    }
-
-    player.position = newPos;
-
-    // Doubles = can roll again (diceRolled stays false); otherwise lock
-    if (!isDoubles) {
-        player.diceRolled = true;
-    }
-
-    gameState.gameLog.push({
-        timestamp: new Date().toISOString(),
-        message: `${player.name} rolled ${die1}+${die2}=${total} — moved to ${BOARD_SQUARES[newPos].name}${isDoubles ? ' (doubles — roll again!)' : ''}`
-    });
-
-    await logGameEvent('dice_roll', {
-        player: player.name,
-        die1, die2, total,
-        isDoubles,
-        square: BOARD_SQUARES[newPos].name
-    });
-
-    // Process landing effects (may modify gameState or show modals)
-    const landingEvents = processLanding(player, newPos, gameState, total);
-
-    // Save updated state
-    await updateGameState(gameState, 'dice_roll');
-    for (const event of landingEvents) {
-        await logGameEvent(event.type, event.data);
-    }
-    renderGameState(currentGame.game_state);
-    renderBoardTab();
 }
 
 // ---------------------------------------------------------------
@@ -1526,7 +1129,7 @@ function showRentPrompt(square, property, owner, amount) {
     const cashAfter = (myPlayer ? myPlayer.cash : 0) - amount;
 
     document.getElementById('rentModalMessage').innerHTML =
-        `You landed on <strong>${square.name}</strong> (owned by <strong>${owner.name}</strong>).`;
+        `You landed on <strong>${escapeHtml(square.name)}</strong> (owned by <strong>${escapeHtml(owner.name)}</strong>).`;
     document.getElementById('rentModalAmount').textContent = `Rent: $${amount}`;
     document.getElementById('rentModalCashAfter').textContent =
         `Your cash: $${myPlayer ? Math.round(myPlayer.cash) : '?'} → $${Math.round(cashAfter)} after payment`;
@@ -1541,7 +1144,7 @@ function showTaxPrompt(amount, squareName) {
     const cashAfter = (myPlayer ? myPlayer.cash : 0) - amount;
 
     document.getElementById('rentModalMessage').innerHTML =
-        `You landed on <strong>${squareName}</strong>.`;
+        `You landed on <strong>${escapeHtml(squareName)}</strong>.`;
     document.getElementById('rentModalAmount').textContent = `Tax: $${amount}`;
     document.getElementById('rentModalCashAfter').textContent =
         `Your cash: $${myPlayer ? Math.round(myPlayer.cash) : '?'} → $${Math.round(cashAfter)} after payment`;
@@ -1550,42 +1153,9 @@ function showTaxPrompt(amount, squareName) {
 }
 
 async function confirmRentPayment() {
-    if (!pendingPayment) return;
-
-    try {
-        const gameState = currentGame.game_state;
-        const payer = gameState.players.find(p => p.userId === currentUser.id);
-        if (!payer) return;
-
-        payer.cash -= pendingPayment.amount;
-
-        if (pendingPayment.toPlayerId) {
-            const recipient = gameState.players.find(p => p.userId === pendingPayment.toPlayerId);
-            if (recipient) recipient.cash += pendingPayment.amount;
-        }
-
-        gameState.gameLog.push({
-            timestamp: new Date().toISOString(),
-            message: `${payer.name} paid $${pendingPayment.amount} to ${pendingPayment.toPlayerName}`
-        });
-
-        await updateGameState(gameState, 'forced_payment');
-        renderGameState(currentGame.game_state);
-        await logGameEvent('payment', {
-            from: payer.name,
-            to: pendingPayment.toPlayerName,
-            amount: pendingPayment.amount
-        });
-
-        currentPlayerData = gameState.players.find(p => p.userId === currentUser.id);
-        pendingPayment = null;
-        closeModal('rentModal');
-        renderBoardTab();
-
-    } catch (error) {
-        console.error('Error processing payment:', error);
-        alert('Failed to process payment');
-    }
+    pendingPayment = null;
+    closeModal('rentModal');
+    renderBoardTab();
 }
 
 // ---------------------------------------------------------------
@@ -1618,7 +1188,7 @@ function openHouseModal() {
                 <div class="house-property-row">
                     <div>
                         <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${PROP_COLORS[prop.color]};margin-right:6px;vertical-align:middle;"></span>
-                        <strong>${prop.name}</strong>
+                        <strong>${escapeHtml(prop.name)}</strong>
                         <span style="color:#888;margin-left:6px;font-size:0.8rem;">($${costPer}/house)</span>
                     </div>
                     <div class="house-count-control">
@@ -1653,59 +1223,14 @@ async function confirmHousePurchase() {
     if (!currentGame || !currentUser) return;
 
     try {
-        const gameState = currentGame.game_state;
-        const myPlayer = gameState.players.find(p => p.userId === currentUser.id);
-        if (!myPlayer) return;
-
-        let totalCost = 0;
-        const changes = [];
-
-        for (const [propId, delta] of Object.entries(pendingHouseSelections)) {
-            if (delta <= 0) continue;
-            const prop = gameState.properties.find(p => p.id === propId);
-            if (!prop) continue;
-            const cost = delta * (HOUSE_COSTS[prop.color] || 0);
-            totalCost += cost;
-            changes.push({ prop, delta, cost });
-        }
-
-        if (changes.length === 0) {
+        const selections = Object.fromEntries(Object.entries(pendingHouseSelections).filter(([, delta]) => delta > 0));
+        if (Object.keys(selections).length === 0) {
             showToast('No houses selected.');
             return;
         }
-
-        if (myPlayer.cash < totalCost) {
-            showToast(`Insufficient funds. Need $${totalCost}, have $${Math.round(myPlayer.cash)}.`);
-            return;
-        }
-
-        myPlayer.cash -= totalCost;
-        changes.forEach(({ prop, delta }) => {
-            prop.houses = Math.min(5, (prop.houses || 0) + delta);
-            // Sync value in player.properties so net worth stays accurate
-            const playerPropEntry = myPlayer.properties.find(p => p.id === prop.id);
-            if (playerPropEntry) {
-                playerPropEntry.value = prop.price + prop.houses * (HOUSE_COSTS[prop.color] || 0);
-            }
-        });
-
-        gameState.gameLog.push({
-            timestamp: new Date().toISOString(),
-            message: `${myPlayer.name} bought houses/hotels for $${totalCost}`
-        });
-
-        await updateGameState(gameState, 'house_purchase');
-        renderGameState(currentGame.game_state);
-        await logGameEvent('house_purchase', {
-            player: myPlayer.name,
-            cost: totalCost,
-            properties: changes.map(c => ({ name: c.prop.name, added: c.delta }))
-        });
-
-        currentPlayerData = gameState.players.find(p => p.userId === currentUser.id);
+        await performGameAction('buy_houses', { selections });
         pendingHouseSelections = {};
         closeModal('houseModal');
-        renderBoardTab();
 
     } catch (error) {
         console.error('Error buying houses:', error);

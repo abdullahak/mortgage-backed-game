@@ -1,7 +1,7 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
 
-const BASE = 'http://192.168.4.57';
+const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
 
 test.describe('Auth flow', () => {
     test.beforeEach(async ({ page }) => {
@@ -26,15 +26,13 @@ test.describe('Auth flow', () => {
     test('entering email and clicking send shows OTP input area', async ({ page }) => {
         await page.goto(`${BASE}/auth.html`);
         const emailInput = page.locator('input[type="email"], input[name="email"], #email').first();
-        await emailInput.fill('test@example.com');
+        await emailInput.fill(uniqueEmail('otp'));
 
         const sendBtn = page.locator('button[type="submit"], button').filter({ hasText: /send|code|continue/i }).first();
         await sendBtn.click();
 
         // After sending OTP, expect either a code input or success message
-        await expect(
-            page.locator('input[type="text"], input[name="token"], input[name="code"], #token, #code')
-        ).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('#code-input')).toBeVisible({ timeout: 5000 });
     });
 
     test('already-logged-in user visiting auth.html redirects to lobby', async ({ page }) => {
@@ -54,12 +52,12 @@ test.describe('Auth flow', () => {
     test('OTP verification with wrong code shows error message', async ({ page }) => {
         await page.goto(`${BASE}/auth.html`);
         const emailInput = page.locator('input[type="email"], input[name="email"], #email').first();
-        await emailInput.fill('test@example.com');
+        await emailInput.fill(uniqueEmail('wrong-code'));
 
         const sendBtn = page.locator('button').filter({ hasText: /send|code|continue/i }).first();
         await sendBtn.click();
 
-        const codeInput = page.locator('input[type="text"], input[name="token"], input[name="code"], #token, #code').first();
+        const codeInput = page.locator('#code-input');
         await codeInput.waitFor({ timeout: 5000 });
         await codeInput.fill('000000');
 
@@ -67,9 +65,7 @@ test.describe('Auth flow', () => {
         await verifyBtn.click();
 
         // Should show some error feedback
-        await expect(
-            page.locator('[class*="error"], [class*="alert"], [data-testid*="error"], .error, .alert')
-        ).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('#code-error')).toBeVisible({ timeout: 5000 });
     });
 
     test('guest room code entry on landing page', async ({ page }) => {
@@ -86,3 +82,7 @@ test.describe('Auth flow', () => {
         }
     });
 });
+
+function uniqueEmail(prefix) {
+    return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
+}

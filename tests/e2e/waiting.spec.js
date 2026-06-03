@@ -2,8 +2,8 @@
 const { test, expect } = require('@playwright/test');
 const { loginPage } = require('./helpers');
 
-const BASE = 'http://192.168.4.57';
-const BASE_API = `${BASE}/api`;
+const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
+const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
 
 test.describe('Waiting Room', () => {
     let hostToken, hostUserId, guestToken, guestUserId, room;
@@ -32,7 +32,7 @@ test.describe('Waiting Room', () => {
     test('waiting room page loads with room name', async ({ page }) => {
         await loginPage(page, hostToken);
         await page.goto(`${BASE}/waiting.html?room=${room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         await expect(page.locator('body')).toContainText('E2E Waiting Room', { timeout: 5000 });
     });
@@ -40,7 +40,7 @@ test.describe('Waiting Room', () => {
     test('invite code is displayed on waiting room page', async ({ page }) => {
         await loginPage(page, hostToken);
         await page.goto(`${BASE}/waiting.html?room=${room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         await expect(page.locator('body')).toContainText(room.invite_code, { timeout: 5000 });
     });
@@ -48,7 +48,7 @@ test.describe('Waiting Room', () => {
     test('host player name appears in player list', async ({ page }) => {
         await loginPage(page, hostToken);
         await page.goto(`${BASE}/waiting.html?room=${room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         await expect(page.locator('body')).toContainText('Host', { timeout: 5000 });
     });
@@ -56,9 +56,9 @@ test.describe('Waiting Room', () => {
     test('Start Game button is visible to host', async ({ page }) => {
         await loginPage(page, hostToken);
         await page.goto(`${BASE}/waiting.html?room=${room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
-        const startBtn = page.locator('button').filter({ hasText: /start/i }).first();
+        const startBtn = page.locator('#start-game-btn');
         await expect(startBtn).toBeVisible({ timeout: 5000 });
     });
 
@@ -71,7 +71,7 @@ test.describe('Waiting Room', () => {
 
         await loginPage(page, guestToken);
         await page.goto(`${BASE}/waiting.html?room=${room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         await expect(page.locator('body')).toBeVisible();
     });
@@ -85,16 +85,16 @@ test.describe('Waiting Room', () => {
 
         await loginPage(page, hostToken);
         await page.goto(`${BASE}/waiting.html?room=${room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         await expect(page.locator('body')).toContainText('Host', { timeout: 5000 });
-        await expect(page.locator('body')).toContainText('GuestPlayer', { timeout: 5000 });
+        await expect(page.locator('body')).toContainText('Guest', { timeout: 5000 });
     });
 
     test('copy invite code button is present', async ({ page }) => {
         await loginPage(page, hostToken);
         await page.goto(`${BASE}/waiting.html?room=${room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         const copyBtn = page.locator('button').filter({ hasText: /copy/i }).first();
         if (await copyBtn.count() > 0) {
@@ -108,7 +108,7 @@ test.describe('Waiting Room', () => {
     test('leave room button is present', async ({ page }) => {
         await loginPage(page, hostToken);
         await page.goto(`${BASE}/waiting.html?room=${room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         const leaveBtn = page.locator('button, a').filter({ hasText: /leave/i }).first();
         if (await leaveBtn.count() > 0) {

@@ -225,29 +225,35 @@ describe('GET /api/rooms/:id', () => {
         const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'GETID1' });
 
-        const res = await request(app).get(`/api/rooms/${room.id}`);
+        const res = await request(app)
+            .get(`/api/rooms/${room.id}`)
+            .set('Authorization', `Bearer ${user1.token}`);
         expect(res.status).toBe(200);
         expect(res.body.id).toBe(room.id);
     });
 
     test('404 for non-existent id', async () => {
-        const res = await request(app).get('/api/rooms/nonexistent-uuid');
+        const res = await request(app)
+            .get('/api/rooms/nonexistent-uuid')
+            .set('Authorization', `Bearer ${user1.token}`);
         expect(res.status).toBe(404);
     });
 
-    test('no auth required', async () => {
+    test('auth required', async () => {
         const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'NOAUTH' });
 
         const res = await request(app).get(`/api/rooms/${room.id}`);
-        expect(res.status).toBe(200);
+        expect(res.status).toBe(401);
     });
 
     test('returns room_members sorted by joined_at', async () => {
         const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'SORT01' });
 
-        const res = await request(app).get(`/api/rooms/${room.id}`);
+        const res = await request(app)
+            .get(`/api/rooms/${room.id}`)
+            .set('Authorization', `Bearer ${user1.token}`);
         expect(Array.isArray(res.body.room_members)).toBe(true);
     });
 });

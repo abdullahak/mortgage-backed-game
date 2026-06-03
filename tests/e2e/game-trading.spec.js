@@ -2,8 +2,8 @@
 const { test, expect } = require('@playwright/test');
 const { loginPage } = require('./helpers');
 
-const BASE = 'http://192.168.4.57';
-const BASE_API = `${BASE}/api`;
+const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
+const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
 
 /**
  * Setup a 2-player game with some properties owned.
@@ -60,12 +60,19 @@ test.describe('Trading — API state manipulation', () => {
             ],
         };
 
-        await request.patch(`${BASE_API}/games/${game.id}/state`, {
+        await request.post(`${BASE_API}/games/${game.id}/actions`, {
             headers: { Authorization: `Bearer ${hostToken}` },
-            data: { game_state: updatedState },
+            data: {
+                actionId: `e2e-payment-${Date.now()}`,
+                type: 'manual_payment',
+                payload: { fromPlayerId: hostId, toPlayerId: guestId, amount: 200 },
+                expectedVersion: game.state_version,
+            },
         });
 
-        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`)).json();
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${hostToken}` },
+        })).json();
         expect(fetched.game_state.players[0].cash).toBe(1300);
         expect(fetched.game_state.players[1].cash).toBe(1700);
     });
@@ -82,12 +89,19 @@ test.describe('Trading — API state manipulation', () => {
             ],
         };
 
-        await request.patch(`${BASE_API}/games/${game.id}/state`, {
+        await request.post(`${BASE_API}/games/${game.id}/actions`, {
             headers: { Authorization: `Bearer ${hostToken}` },
-            data: { game_state: updatedState },
+            data: {
+                actionId: `e2e-trade-prop-${Date.now()}`,
+                type: 'trade',
+                payload: { player1Id: hostId, player2Id: guestId, player1Cash: 0, player2Cash: 0, player1AssetIds: ['prop-0'], player2AssetIds: [] },
+                expectedVersion: game.state_version,
+            },
         });
 
-        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`)).json();
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${hostToken}` },
+        })).json();
         expect(fetched.game_state.properties[0].ownerId).toBe(guestId);
         expect(fetched.game_state.properties[0].ownerName).toBe('Bob');
     });
@@ -108,12 +122,19 @@ test.describe('Trading — API state manipulation', () => {
             ],
         };
 
-        await request.patch(`${BASE_API}/games/${game.id}/state`, {
+        await request.post(`${BASE_API}/games/${game.id}/actions`, {
             headers: { Authorization: `Bearer ${hostToken}` },
-            data: { game_state: updatedState },
+            data: {
+                actionId: `e2e-trade-mutual-${Date.now()}`,
+                type: 'trade',
+                payload: { player1Id: hostId, player2Id: guestId, player1Cash: 0, player2Cash: 100, player1AssetIds: ['prop-0'], player2AssetIds: [] },
+                expectedVersion: game.state_version,
+            },
         });
 
-        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`)).json();
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${hostToken}` },
+        })).json();
         expect(fetched.game_state.players[0].cash).toBe(1600);
         expect(fetched.game_state.players[1].cash).toBe(1400);
         expect(fetched.game_state.properties[0].ownerId).toBe(guestId);
@@ -130,7 +151,7 @@ test.describe('Trading — UI', () => {
     test('game.html loads with market/trading functionality accessible', async ({ page }) => {
         await loginPage(page, setup.hostToken);
         await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         // Look for market/trade tab
         const marketTab = page.locator('[role="tab"], button, a').filter({ hasText: /market|trade|transaction/i }).first();
@@ -145,7 +166,7 @@ test.describe('Trading — UI', () => {
     test('corporation panel is accessible in game', async ({ page }) => {
         await loginPage(page, setup.hostToken);
         await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         // Check for corporations tab or button
         const corpTab = page.locator('[role="tab"], button, a').filter({ hasText: /corp/i }).first();
@@ -160,7 +181,7 @@ test.describe('Trading — UI', () => {
     test('player cash values are shown on game page', async ({ page }) => {
         await loginPage(page, setup.hostToken);
         await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         // Should show cash amounts
         await expect(page.locator('body')).toContainText('1500', { timeout: 5000 });
@@ -169,7 +190,7 @@ test.describe('Trading — UI', () => {
     test('property names are shown in game state', async ({ page }) => {
         await loginPage(page, setup.hostToken);
         await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         // Board has Mediterranean Ave
         const boardTab = page.locator('[role="tab"], button, a').filter({ hasText: /board/i }).first();

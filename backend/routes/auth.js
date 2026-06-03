@@ -1,12 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { sendEmail } = require('../mailer');
 const db = require('../db');
+const { getConfig } = require('../config');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
-const JWT_EXPIRY = '30d';
+const config = getConfig();
+const JWT_SECRET = config.jwtSecret;
+const JWT_EXPIRY = config.jwtExpiry;
+const otpSendLimits = new Map();
+const otpVerifyLimits = new Map();
 
 // Middleware: verify JWT and attach user
 function requireAuth(req, res, next) {
@@ -36,8 +41,11 @@ router.post('/send-otp', async (req, res) => {
         return res.status(400).json({ error: 'Valid email required' });
     }
     const normalizedEmail = email.toLowerCase();
+    if (isRateLimited(otpSendLimits, `${req.ip}:${normalizedEmail}`, 5, 15 * 60 * 1000)) {
+        return res.status(429).json({ error: 'Too many code requests' });
+    }
 
-    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const code = String(crypto.randomInt(100000, 1000000));
     const id = uuidv4();
     const expires = toSqliteDate(new Date(Date.now() + 10 * 60 * 1000)); // 10 min
 
@@ -49,16 +57,18 @@ router.post('/send-otp', async (req, res) => {
         VALUES (?, ?, ?, ?)
     `).run(id, normalizedEmail, code, expires);
 
-    try {
-        await sendEmail(
-            email,
-            'Your Mortgage Backed Monopoly login code',
-            `Your verification code is: ${code}\n\nValid for 10 minutes.`,
-            `<p>Your verification code is: <strong>${code}</strong></p><p>Valid for 10 minutes.</p>`
-        );
-    } catch (err) {
-        console.error('Email send error:', err);
-        console.log(`\n📧 OTP for ${email}: ${code}\n`);
+    if (process.env.NODE_ENV !== 'test') {
+        try {
+            await sendEmail(
+                email,
+                'Your Mortgage Backed Monopoly login code',
+                `Your verification code is: ${code}\n\nValid for 10 minutes.`,
+                `<p>Your verification code is: <strong>${code}</strong></p><p>Valid for 10 minutes.</p>`
+            );
+        } catch (err) {
+            console.error('Email send error:', err);
+            if (config.otpLogEnabled) console.log(`\nOTP for ${email}: ${code}\n`);
+        }
     }
 
     res.json({ ok: true });
@@ -71,12 +81,18 @@ router.post('/verify-otp', (req, res) => {
         return res.status(400).json({ error: 'email and token required' });
     }
 
+    const normalizedEmail = email.toLowerCase();
+    if (isRateLimited(otpVerifyLimits, `${req.ip}:${normalizedEmail}`, 10, 15 * 60 * 1000)) {
+        return res.status(429).json({ error: 'Too many verification attempts' });
+    }
+
     const otp = db.prepare(`
         SELECT * FROM otps
         WHERE email = ? AND code = ? AND used = 0 AND expires_at > datetime('now')
-    `).get(email.toLowerCase(), String(token));
+    `).get(normalizedEmail, String(token));
 
     if (!otp) {
+        db.prepare(`UPDATE otps SET attempts = attempts + 1 WHERE email = ? AND used = 0`).run(normalizedEmail);
         return res.status(400).json({ error: 'Invalid or expired code' });
     }
 
@@ -84,10 +100,10 @@ router.post('/verify-otp', (req, res) => {
     db.prepare(`UPDATE otps SET used = 1 WHERE id = ?`).run(otp.id);
 
     // Get or create user
-    let user = db.prepare(`SELECT * FROM users WHERE email = ?`).get(email.toLowerCase());
+    let user = db.prepare(`SELECT * FROM users WHERE email = ?`).get(normalizedEmail);
     if (!user) {
         const userId = uuidv4();
-        db.prepare(`INSERT INTO users (id, email, is_anonymous) VALUES (?, ?, 0)`).run(userId, email.toLowerCase());
+        db.prepare(`INSERT INTO users (id, email, is_anonymous) VALUES (?, ?, 0)`).run(userId, normalizedEmail);
         user = db.prepare(`SELECT * FROM users WHERE id = ?`).get(userId);
     }
 
@@ -118,4 +134,16 @@ module.exports = { router, requireAuth };
 
 function toSqliteDate(date) {
     return date.toISOString().replace('T', ' ').slice(0, 19);
+}
+
+function isRateLimited(map, key, max, windowMs) {
+    const now = Date.now();
+    const record = map.get(key) || { count: 0, resetAt: now + windowMs };
+    if (now > record.resetAt) {
+        record.count = 0;
+        record.resetAt = now + windowMs;
+    }
+    record.count += 1;
+    map.set(key, record);
+    return record.count > max;
 }

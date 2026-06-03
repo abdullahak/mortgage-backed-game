@@ -5,6 +5,7 @@
     "test:e2e": "npx playwright test",
     "test:e2e:ui": "npx playwright test --ui",
     "test:e2e:headed": "npx playwright test --headed",
+    "test:e2e:real-game": "node scripts/run-real-game-e2e.js",
     "test:gameplay": "node scripts/simulate-full-game.js"
   },
   "devDependencies": {
