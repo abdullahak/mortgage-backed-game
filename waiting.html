@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Waiting Room - Mortgage Backed Monopoly</title>
-    <link rel="stylesheet" href="src/css/style.css?v=5">
+    <link rel="stylesheet" href="src/css/style.css?v=6">
 </head>
 <body>
     <div class="container">
@@ -24,6 +24,7 @@
                 <p style="color: #7f8c8d; margin-bottom: 20px;">
                     Enter your name to join the room.
                 </p>
+                <div id="hotseat-resume-options" class="hotseat-resume-options"></div>
                 <div class="form-group">
                     <label>Room Code:</label>
                     <input type="text" id="guest-room-code" style="text-transform: uppercase; letter-spacing: 0.15em; font-weight: 600;" readonly>
@@ -106,9 +107,9 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="src/js/config.js?v=4"></script>
-    <script src="src/js/supabase.js?v=4"></script>
+    <script src="src/js/supabase.js?v=6"></script>
     <script src="src/js/game-data.js?v=1"></script>
     <script src="src/js/board.js?v=5"></script>
-    <script src="src/js/waiting.js?v=4"></script>
+    <script src="src/js/waiting.js?v=6"></script>
 </body>
 </html>

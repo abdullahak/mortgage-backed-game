@@ -375,6 +375,136 @@ describe('POST /api/games/:id/actions', () => {
         expect(second.status).toBe(200);
         expect(second.body.game.state_version).toBe(first.body.game.state_version);
     });
+
+    test('issue_debt uses fixed game interest rate instead of client payload', async () => {
+        const res = await request(app)
+            .post(`/api/games/${gameId}/actions`)
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send(actionPayload('issue_debt', { amount: 100, interestRate: 99, collateralIds: [] }));
+
+        expect(res.status).toBe(200);
+        expect(res.body.game.game_state.players[0].debts[0].interestRate).toBe(5);
+    });
+
+    test('chairman can issue debt under a corporation', async () => {
+        const state = minimalGameState();
+        state.corporations = [{
+            id: 'corp-1',
+            ticker: 'ALPH',
+            name: 'ALPH Corporation',
+            founderId: user1.id,
+            founderName: 'Alice',
+            chairmanId: user1.id,
+            chairmanName: 'Alice',
+            totalShares: 8,
+            pricePerShare: 50,
+            availableShares: 8,
+            assets: [{ id: 'prop-0', name: 'Mediterranean Avenue', value: 60 }],
+            shareholders: [],
+            debts: [],
+            cash: 0,
+        }];
+        db.prepare(`UPDATE games SET game_state = ?, state_version = 0 WHERE id = ?`).run(JSON.stringify(state), gameId);
+
+        const res = await request(app)
+            .post(`/api/games/${gameId}/actions`)
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send(actionPayload('issue_debt', {
+                amount: 250,
+                interestRate: 99,
+                issuerType: 'corporation',
+                corpId: 'corp-1',
+                collateralIds: ['prop-0'],
+            }));
+
+        expect(res.status).toBe(200);
+        const corp = res.body.game.game_state.corporations.find(item => item.id === 'corp-1');
+        expect(corp.debts[0].principal).toBe(250);
+        expect(corp.debts[0].interestRate).toBe(5);
+        expect(corp.cash).toBe(250);
+    });
+
+    test('majority shareholder can change corporation chairman directly', async () => {
+        addRoomMember(room.id, user2.id, 'Bob');
+        const state = minimalGameState();
+        state.corporations = [governedCorp({
+            chairmanId: user1.id,
+            chairmanName: 'Alice',
+            shareholders: [{ userId: user2.id, name: 'Bob', shares: 5 }],
+            totalShares: 8,
+        })];
+        db.prepare(`UPDATE games SET game_state = ?, state_version = 0 WHERE id = ?`).run(JSON.stringify(state), gameId);
+
+        const res = await request(app)
+            .post(`/api/games/${gameId}/actions`)
+            .set('Authorization', `Bearer ${user2.token}`)
+            .send(actionPayload('change_chairman', { corpId: 'corp-1', candidateUserId: user2.id }));
+
+        expect(res.status).toBe(200);
+        const corp = res.body.game.game_state.corporations.find(item => item.id === 'corp-1');
+        expect(corp.chairmanId).toBe(user2.id);
+        expect(corp.chairmanName).toBe('Bob');
+    });
+
+    test('half ownership cannot remove existing chairman without pooled majority vote', async () => {
+        addRoomMember(room.id, user2.id, 'Bob');
+        const state = minimalGameState();
+        state.corporations = [governedCorp({
+            chairmanId: user1.id,
+            chairmanName: 'Alice',
+            shareholders: [{ userId: user2.id, name: 'Bob', shares: 4 }],
+            totalShares: 8,
+        })];
+        db.prepare(`UPDATE games SET game_state = ?, state_version = 0 WHERE id = ?`).run(JSON.stringify(state), gameId);
+
+        const res = await request(app)
+            .post(`/api/games/${gameId}/actions`)
+            .set('Authorization', `Bearer ${user2.token}`)
+            .send(actionPayload('change_chairman', { corpId: 'corp-1', candidateUserId: user2.id }));
+
+        expect(res.status).toBe(403);
+    });
+
+    test('shareholders can pool shares through a vote to change chairman', async () => {
+        const { createUserFixture } = require('../helpers/fixtures');
+        const user3 = createUserFixture(db);
+        addRoomMember(room.id, user2.id, 'Bob');
+        addRoomMember(room.id, user3.id, 'Carol');
+        const state = minimalGameState();
+        state.players.push({ userId: user3.id, name: 'Carol', cash: 1500, position: 0, bankrupt: false, inJail: false, properties: [], corporations: [], debts: [] });
+        state.corporations = [governedCorp({
+            chairmanId: user1.id,
+            chairmanName: 'Alice',
+            shareholders: [
+                { userId: user2.id, name: 'Bob', shares: 3 },
+                { userId: user3.id, name: 'Carol', shares: 3 },
+            ],
+            totalShares: 9,
+        })];
+        db.prepare(`UPDATE games SET game_state = ?, state_version = 0 WHERE id = ?`).run(JSON.stringify(state), gameId);
+
+        const proposed = await request(app)
+            .post(`/api/games/${gameId}/actions`)
+            .set('Authorization', `Bearer ${user2.token}`)
+            .send(actionPayload('propose_chairman_vote', { corpId: 'corp-1', candidateUserId: user2.id }));
+
+        expect(proposed.status).toBe(200);
+        let corp = proposed.body.game.game_state.corporations.find(item => item.id === 'corp-1');
+        expect(corp.chairmanId).toBe(user1.id);
+        expect(corp.chairmanVotes[0].status).toBe('open');
+
+        const supported = await request(app)
+            .post(`/api/games/${gameId}/actions`)
+            .set('Authorization', `Bearer ${user3.token}`)
+            .send(actionPayload('support_chairman_vote', { corpId: 'corp-1', voteId: corp.chairmanVotes[0].id }, proposed.body.game.state_version));
+
+        expect(supported.status).toBe(200);
+        corp = supported.body.game.game_state.corporations.find(item => item.id === 'corp-1');
+        expect(corp.chairmanId).toBe(user2.id);
+        expect(corp.chairmanName).toBe('Bob');
+        expect(corp.chairmanVotes[0].status).toBe('passed');
+        expect(corp.chairmanVotes[0].supportedShares).toBe(6);
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -545,4 +675,31 @@ describe('Game state integrity', () => {
 
 function uuidForTest() {
     return `test-${Math.random().toString(16).slice(2)}-${Date.now()}`;
+}
+
+function addRoomMember(roomId, userId, playerName) {
+    db.prepare(`
+        INSERT INTO room_members (id, room_id, user_id, player_name)
+        VALUES (?, ?, ?, ?)
+    `).run(uuidForTest(), roomId, userId, playerName);
+}
+
+function governedCorp(overrides = {}) {
+    return {
+        id: 'corp-1',
+        ticker: 'ALPH',
+        name: 'ALPH Corporation',
+        founderId: overrides.founderId || overrides.chairmanId,
+        founderName: overrides.founderName || overrides.chairmanName,
+        chairmanId: overrides.chairmanId,
+        chairmanName: overrides.chairmanName,
+        totalShares: overrides.totalShares || 8,
+        pricePerShare: 50,
+        availableShares: overrides.availableShares || 0,
+        assets: [{ id: 'prop-0', name: 'Mediterranean Avenue', value: 60 }],
+        shareholders: overrides.shareholders || [],
+        debts: [],
+        cash: 0,
+        chairmanVotes: [],
+    };
 }

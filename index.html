@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mortgage Backed Monopoly — Play Monopoly Like Wall Street</title>
-    <link rel="stylesheet" href="src/css/landing.css?v=5">
+    <link rel="stylesheet" href="src/css/landing.css?v=6">
 </head>
 <body>
 
@@ -73,6 +73,7 @@
                         <button class="btn btn-primary" onclick="resumeWithCode()">Join Game</button>
                     </div>
                     <div id="resume-error" class="resume-error" role="alert"></div>
+                    <div id="hotseat-resume-options" class="hotseat-resume-options"></div>
                     <a class="forgot-link" onclick="showForgotCode(event)" href="#">Forgot your code?</a>
 
                     <!-- Forgot code subform -->
@@ -271,7 +272,7 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="src/js/config.js?v=4"></script>
-    <script src="src/js/supabase.js?v=4"></script>
+    <script src="src/js/supabase.js?v=6"></script>
     <script>
         /* ── Nav: transparent over hero, glass when scrolled ── */
         const nav = document.getElementById('main-nav');
@@ -321,6 +322,12 @@
                 return;
             }
             errorEl.style.display = 'none';
+
+            const optionsEl = document.getElementById('hotseat-resume-options');
+            if (renderHotseatResumeOptions(optionsEl, code)) {
+                return;
+            }
+
             window.location.href = `waiting.html?code=${encodeURIComponent(code)}`;
         }
 

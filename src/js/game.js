@@ -163,13 +163,14 @@ function renderGameState(gameState) {
                 </div>
                 <p>${escapeHtml(landing.detail)}</p>
             </div>
+            ${renderLastCardSummary(gameState, currentPlayer)}
         </div>
 
         <div class="players-grid">
             ${orderedPlayers.map(player => renderPlayerCard(player, player.userId === currentUser.id)).join('')}
         </div>
 
-        ${isMyTurn ? renderActionButtons() : ''}
+        ${isMyTurn ? renderActionButtons() : renderNonTurnActions()}
 
         <div class="recent-log">
             <h3>Recent Actions</h3>
@@ -236,10 +237,37 @@ function getLandingSummary(gameState, player) {
     };
 }
 
+function renderLastCardSummary(gameState, player) {
+    const lastCard = normalizeLastCardDrawn(gameState.lastCardDrawn);
+    if (!lastCard || lastCard.playerId !== player.userId) return '';
+    return `
+        <div class="card-effect-summary">
+            <span>${escapeHtml(deckDisplayName(lastCard.deckType))}</span>
+            <strong>${escapeHtml(lastCard.card)}</strong>
+            <p>${escapeHtml(lastCard.effect ? `Applied: ${lastCard.effect}.` : 'Card effect was applied automatically.')}</p>
+        </div>
+    `;
+}
+
+function normalizeLastCardDrawn(card) {
+    if (!card) return null;
+    if (card.card || card.playerId || card.effect) return card;
+    return { card: card.text || 'Card drawn', deckType: 'card', playerId: null, effect: null };
+}
+
+function deckDisplayName(deckType) {
+    if (deckType === 'chance') return 'Chance';
+    if (deckType === 'community_chest') return 'Community Chest';
+    return 'Card';
+}
+
 // Render individual player card
 function renderPlayerCard(player, isCurrentUser) {
     const totalPropertyValue = player.properties.reduce((sum, p) => sum + p.value, 0);
-    const netWorth = player.cash + totalPropertyValue;
+    const corporationValue = getPlayerCorporationValue(player);
+    const debtTotal = getDebtTotal(player.debts);
+    const netWorth = player.cash + totalPropertyValue + corporationValue - debtTotal;
+    const cashFlow = getEntityCashFlow(player.userId);
 
     const cardDetails = `
         <div class="player-stats">
@@ -255,6 +283,11 @@ function renderPlayerCard(player, isCurrentUser) {
                 <span class="stat-label">Net Worth:</span>
                 <span class="stat-value">$${netWorth.toFixed(2)}</span>
             </div>
+        </div>
+        <div class="cash-flow-summary">
+            <div><span>Paid this turn</span><strong>$${cashFlow.paid.toFixed(2)}</strong></div>
+            <div><span>Received this turn</span><strong>$${cashFlow.received.toFixed(2)}</strong></div>
+            <div><span>Received between turns</span><strong>$${cashFlow.receivedBetweenTurns.toFixed(2)}</strong></div>
         </div>
         ${player.properties.length > 0 ? `
             <div class="player-properties">
@@ -273,7 +306,8 @@ function renderPlayerCard(player, isCurrentUser) {
                 <h4>Corporations:</h4>
                 ${player.corporations.map(c => `
                     <div class="corp-badge">
-                        ${c.ticker} (${c.sharesOwned}/${c.totalShares} shares)
+                        ${escapeHtml(c.ticker)} (${c.sharesOwned}/${c.totalShares} shares, ${ownershipPercent(c.sharesOwned, c.totalShares)}%)
+                        ${renderCorporationAssetSummary(c.id)}
                     </div>
                 `).join('')}
             </div>
@@ -283,7 +317,8 @@ function renderPlayerCard(player, isCurrentUser) {
                 <h4>Debts:</h4>
                 ${player.debts.map(d => `
                     <div class="debt-badge">
-                        $${d.principal.toFixed(2)} @ ${d.interestRate}%
+                        $${Number(d.principal || 0).toFixed(2)} @ ${Number(d.interestRate || 0)}%
+                        <span>Interest next turn: $${interestPayment(d).toFixed(2)}</span>
                     </div>
                 `).join('')}
             </div>
@@ -318,6 +353,49 @@ function renderPlayerCard(player, isCurrentUser) {
             </div>
         </div>
     `;
+}
+
+function getDebtTotal(debts) {
+    return (debts || []).reduce((sum, debt) => sum + Number(debt.principal || 0), 0);
+}
+
+function interestPayment(debt) {
+    return Number(debt.principal || 0) * (Number(debt.interestRate || 0) / 100);
+}
+
+function getPlayerCorporationValue(player) {
+    return (player.corporations || []).reduce((sum, corp) => {
+        return sum + Number(corp.sharesOwned || 0) * Number(corp.pricePerShare || 0);
+    }, 0);
+}
+
+function getEntityCashFlow(entityId) {
+    const flow = currentGame?.game_state?.turnCashFlow?.[entityId] || {};
+    return {
+        paid: Number(flow.paid || 0),
+        received: Number(flow.received || 0),
+        receivedBetweenTurns: Number(flow.receivedBetweenTurns || 0),
+    };
+}
+
+function ownershipPercent(sharesOwned, totalShares) {
+    const total = Number(totalShares || 0);
+    if (!total) return '0.0';
+    return ((Number(sharesOwned || 0) / total) * 100).toFixed(1);
+}
+
+function renderCorporationAssetSummary(corpId) {
+    const corp = currentGame?.game_state?.corporations?.find(item => item.id === corpId);
+    if (!corp || !Array.isArray(corp.assets) || corp.assets.length === 0) return '';
+    const assets = corp.assets
+        .map(asset => `${escapeHtml(asset.name)} (${ownershipPercent(getMyShares(corp), corp.totalShares)}%)`)
+        .join(', ');
+    return `<span class="corp-assets-owned">Assets: ${assets}</span>`;
+}
+
+function getMyShares(corp) {
+    const holder = (corp.shareholders || []).find(item => item.userId === currentUser.id);
+    return holder ? Number(holder.shares || 0) : 0;
 }
 
 function togglePlayerCard(summaryEl) {
@@ -360,6 +438,16 @@ function buyUnavailableLabel(landing) {
     return 'No Property to Buy';
 }
 
+function renderNonTurnActions() {
+    return `
+        <div class="action-buttons">
+            <div class="action-btn-secondary-group">
+                <button class="btn btn-secondary btn-sm" onclick="openCorporationModal()">Corporations</button>
+            </div>
+        </div>
+    `;
+}
+
 // Format a game event into a human-readable string
 function formatLogEvent(type, data) {
     switch (type) {
@@ -369,8 +457,14 @@ function formatLogEvent(type, data) {
             return `${data.founder} created IPO ${data.ticker} — ${data.shares} shares at $${Number(data.pricePerShare).toFixed(2)}/share`;
         case 'share_purchase':
             return `${data.buyer} bought ${data.shares} share(s) of ${data.ticker} for $${Number(data.totalCost).toFixed(2)}`;
+        case 'chairman_changed':
+            return `${data.ticker} chairman changed to ${data.chairman} by ${data.method === 'vote' ? `${data.supportedShares} supporting shares` : 'majority control'}`;
+        case 'chairman_vote_proposed':
+            return `${data.ticker} chairman vote proposed for ${data.candidate}`;
+        case 'chairman_vote_supported':
+            return `${data.supporter} supported ${data.candidate} for ${data.ticker} chairman`;
         case 'debt_issued':
-            return `${data.issuer} issued debt of $${Number(data.amount).toFixed(2)} at ${data.interestRate}% interest`;
+            return `${data.actor ? `${data.actor} issued` : `${data.issuer} issued`} debt${data.actor ? ` under ${data.issuer}` : ''} of $${Number(data.amount).toFixed(2)} at ${data.interestRate}% interest`;
         case 'debt_payment':
             return `${data.payer} paid $${Number(data.amount).toFixed(2)} towards their debt`;
         case 'interest_accrual':
@@ -396,7 +490,7 @@ function formatLogEvent(type, data) {
         case 'dice_roll':
             return `${data.player} rolled ${data.die1}+${data.die2}=${data.total} — moved to ${data.square}${data.isDoubles ? ' (doubles!)' : ''}`;
         case 'card_draw':
-            return `${data.player} drew ${data.deckType}: "${data.card}"`;
+            return `${data.player} drew ${deckDisplayName(data.deckType)}: "${data.card}"${data.effect ? ` Applied: ${data.effect}.` : ''}`;
         case 'pass_go':
             return `${data.player} passed GO — collected $${data.amount}`;
         default:
@@ -456,6 +550,7 @@ async function openBuyPropertyModal() {
 
     selectedPropertyId = property.id;
     document.getElementById('purchasePrice').value = property.price;
+    document.getElementById('purchasePriceDisplay').textContent = `$${Number(property.price).toFixed(2)}`;
     document.getElementById('availableProperties').innerHTML = propertiesHtml;
     document.getElementById('buyPropertyModal').style.display = 'flex';
 }
@@ -471,6 +566,7 @@ function selectProperty(propertyId) {
 
     const property = currentGame.game_state.properties.find(p => p.id === propertyId);
     document.getElementById('purchasePrice').value = property.price;
+    document.getElementById('purchasePriceDisplay').textContent = `$${Number(property.price).toFixed(2)}`;
 }
 
 async function confirmPurchase() {
@@ -554,15 +650,13 @@ async function createIPO() {
 
 // Open Debt Modal
 async function openDebtModal() {
-    // Load collateral assets
-    const assetsHtml = currentPlayerData.properties.map(p => `
-        <div class="asset-checkbox">
-            <input type="checkbox" id="collateral-${p.id}" value="${p.id}">
-            <label for="collateral-${p.id}">${escapeHtml(p.name)} ($${p.value})</label>
-        </div>
-    `).join('');
-
-    document.getElementById('collateralAssets').innerHTML = assetsHtml;
+    document.getElementById('debtAction').value = 'issue';
+    const rate = Number(currentGame.game_state.settings?.interestRate || 5);
+    document.getElementById('loanRate').value = String(rate);
+    document.getElementById('loanRateDisplay').textContent = `${rate}% per turn`;
+    document.getElementById('debtIssuer').innerHTML = debtIssuerOptionsHtml();
+    renderDebtCollateralOptions();
+    toggleDebtForm();
 
     // Load existing debts
     const debtsHtml = currentPlayerData.debts.map((d, index) => `
@@ -572,6 +666,45 @@ async function openDebtModal() {
     document.getElementById('debtToSettle').innerHTML = debtsHtml || '<option value="">No debts to settle</option>';
 
     document.getElementById('debtModal').style.display = 'flex';
+}
+
+function debtIssuerOptionsHtml() {
+    const corporationOptions = getEligibleDebtCorporations().map(corp =>
+        `<option value="corporation:${corp.id}">${escapeHtml(corp.ticker)} Corporation</option>`
+    );
+    return [
+        '<option value="player">Personal</option>',
+        ...corporationOptions,
+    ].join('');
+}
+
+function getEligibleDebtCorporations() {
+    const gameState = currentGame.game_state;
+    return (gameState.corporations || []).filter(corp => canManageCorporationDebtUi(corp, currentUser.id));
+}
+
+function canManageCorporationDebtUi(corp, userId) {
+    if (!corp || !userId) return false;
+    return corp.chairmanId === userId || hasMajoritySharesUi(corp, userId);
+}
+
+function renderDebtCollateralOptions() {
+    const issuer = document.getElementById('debtIssuer')?.value || 'player';
+    let assets = currentPlayerData.properties || [];
+    if (issuer.startsWith('corporation:')) {
+        const corpId = issuer.split(':')[1];
+        const corp = currentGame.game_state.corporations.find(item => item.id === corpId);
+        assets = corp ? (corp.assets || []) : [];
+    }
+
+    const assetsHtml = assets.map(p => `
+        <div class="asset-checkbox">
+            <input type="checkbox" id="collateral-${p.id}" value="${p.id}">
+            <label for="collateral-${p.id}">${escapeHtml(p.name)} ($${Number(p.value || p.price || 0).toFixed(2)})</label>
+        </div>
+    `).join('');
+
+    document.getElementById('collateralAssets').innerHTML = assetsHtml || '<p class="empty-state">No collateral assets available</p>';
 }
 
 function toggleDebtForm() {
@@ -597,13 +730,16 @@ async function processDebt() {
 
 async function issueDebt() {
     const loanAmount = parseFloat(document.getElementById('loanAmount').value);
-    const interestRate = parseFloat(document.getElementById('loanRate').value);
+    const interestRate = Number(currentGame.game_state.settings?.interestRate || document.getElementById('loanRate').value || 5);
+    const issuer = document.getElementById('debtIssuer').value || 'player';
+    const issuerType = issuer.startsWith('corporation:') ? 'corporation' : 'player';
+    const corpId = issuerType === 'corporation' ? issuer.split(':')[1] : null;
 
     const selectedCollateral = Array.from(document.querySelectorAll('#collateralAssets input:checked'))
-        .map(cb => currentPlayerData.properties.find(p => p.id === cb.value));
+        .map(cb => cb.value);
 
-    if (!loanAmount || !interestRate) {
-        alert('Please fill in all fields');
+    if (!loanAmount) {
+        alert('Please enter a loan amount');
         return;
     }
 
@@ -611,7 +747,9 @@ async function issueDebt() {
         await performGameAction('issue_debt', {
             amount: loanAmount,
             interestRate,
-            collateralIds: selectedCollateral.map(asset => asset.id),
+            issuerType,
+            corpId,
+            collateralIds: selectedCollateral,
         });
         closeModal('debtModal');
 
@@ -656,26 +794,44 @@ async function openCorporationModal() {
     const isMyTurn = gameState.players[gameState.currentPlayerIndex].userId === currentUser.id;
 
     const corporationsHtml = gameState.corporations.map(corp => {
-        const myShares = corp.shareholders.find(s => s.userId === currentUser.id);
+        const shareholders = Array.isArray(corp.shareholders) ? corp.shareholders : [];
+        const assets = Array.isArray(corp.assets) ? corp.assets : [];
+        const debts = Array.isArray(corp.debts) ? corp.debts : [];
+        const myShares = shareholders.find(s => s.userId === currentUser.id);
         const sharesAvailable = typeof corp.availableShares === 'number'
             ? corp.availableShares
-            : corp.totalShares - corp.shareholders.reduce((sum, s) => sum + s.shares, 0);
+            : corp.totalShares - shareholders.reduce((sum, s) => sum + s.shares, 0);
         const isFounder = corp.founderId === currentUser.id;
         const canBuy = isMyTurn && !isFounder && sharesAvailable > 0;
+        const governanceHtml = renderChairmanGovernance(corp);
+        const shareholderRows = shareholders.length
+            ? shareholders.map(s => `<li>${escapeHtml(s.name)}: ${s.shares} shares (${ownershipPercent(s.shares, corp.totalShares)}%)</li>`).join('')
+            : '<li>No public shares sold yet</li>';
+        const debtRows = debts.length
+            ? debts.map(d => `<li>$${Number(d.principal || 0).toFixed(2)} @ ${Number(d.interestRate || 0)}% (interest next turn: $${interestPayment(d).toFixed(2)})</li>`).join('')
+            : '<li>No corporation debt</li>';
 
         return `
         <div class="corporation-card">
             <h3>${escapeHtml(corp.ticker)} - ${escapeHtml(corp.name)}</h3>
             <p>Founder: ${escapeHtml(corp.founderName)}</p>
+            <p>Chairman: ${escapeHtml(corp.chairmanName || corp.founderName || 'Unassigned')}</p>
+            <p>Majority holder: ${escapeHtml(majorityHolderName(corp) || 'None')}</p>
+            <p>Treasury Cash: $${Number(corp.cash || 0).toFixed(2)}</p>
             <p>Total Shares: ${corp.totalShares} | Available: ${sharesAvailable} | Price: $${corp.pricePerShare.toFixed(2)}/share</p>
             <h4>Assets:</h4>
             <ul>
-                ${corp.assets.map(a => `<li>${escapeHtml(a.name)} ($${a.value})</li>`).join('')}
+                ${assets.map(a => `<li>${escapeHtml(a.name)} ($${Number(a.value || 0).toFixed(2)})</li>`).join('') || '<li>No assets</li>'}
             </ul>
             <h4>Shareholders:</h4>
             <ul>
-                ${corp.shareholders.map(s => `<li>${escapeHtml(s.name)}: ${s.shares} shares</li>`).join('')}
+                ${shareholderRows}
             </ul>
+            <h4>Debt:</h4>
+            <ul>
+                ${debtRows}
+            </ul>
+            ${governanceHtml}
             ${myShares ? `<p><strong>Your shares:</strong> ${myShares.shares}</p>` : ''}
             ${canBuy ? `
                 <div class="buy-shares-form" style="margin-top: 10px; padding: 10px; background: #f0f4ff; border-radius: 6px;">
@@ -692,6 +848,119 @@ async function openCorporationModal() {
     document.getElementById('corporationModal').style.display = 'flex';
 }
 
+function renderChairmanGovernance(corp) {
+    const myShares = sharesForUi(corp, currentUser.id);
+    const candidates = chairmanCandidateOptions(corp);
+    const voteOptions = candidates.map(player =>
+        `<option value="${player.userId}">${escapeHtml(player.name)}</option>`
+    ).join('');
+    const required = majorityThresholdUi(corp);
+    const openVotes = (corp.chairmanVotes || []).filter(vote => vote.status === 'open');
+    const openVotesHtml = openVotes.length
+        ? openVotes.map(vote => {
+            const supportedShares = voteSupportSharesUi(corp, vote);
+            const alreadySupported = (vote.supporters || []).some(supporter => supporter.userId === currentUser.id);
+            const canSupport = myShares > 0 && !alreadySupported;
+            return `
+                <div class="chairman-vote-row">
+                    <div>
+                        <strong>${escapeHtml(vote.candidateName)}</strong>
+                        <span>${supportedShares}/${corp.totalShares} shares supporting, ${required} needed</span>
+                    </div>
+                    ${canSupport ? `<button class="btn btn-primary btn-sm" onclick="supportChairmanVote('${corp.id}', '${vote.id}')">Support</button>` : ''}
+                </div>
+            `;
+        }).join('')
+        : '<p class="empty-state">No open chairman votes</p>';
+
+    return `
+        <div class="chairman-governance">
+            <h4>Chairman Governance</h4>
+            <p>Changing chairman requires ${required}/${corp.totalShares} shares.</p>
+            ${hasMajoritySharesUi(corp, currentUser.id) ? `
+                <div class="governance-control">
+                    <label>Majority change:</label>
+                    <select id="chairmanMajority-${corp.id}">${voteOptions}</select>
+                    <button class="btn btn-primary btn-sm" onclick="changeChairmanByMajority('${corp.id}')">Change Chairman</button>
+                </div>
+            ` : ''}
+            ${myShares > 0 ? `
+                <div class="governance-control">
+                    <label>Propose vote:</label>
+                    <select id="chairmanVoteCandidate-${corp.id}">${voteOptions}</select>
+                    <button class="btn btn-secondary btn-sm" onclick="proposeChairmanVote('${corp.id}')">Propose</button>
+                </div>
+            ` : ''}
+            <div class="chairman-votes">
+                ${openVotesHtml}
+            </div>
+        </div>
+    `;
+}
+
+function chairmanCandidateOptions(corp) {
+    const players = currentGame.game_state.players || [];
+    return players.filter(player =>
+        player.userId === corp.chairmanId ||
+        player.userId === corp.founderId ||
+        sharesForUi(corp, player.userId) > 0
+    );
+}
+
+function majorityHolderName(corp) {
+    const holder = (corp.shareholders || []).find(shareholder => hasMajoritySharesUi(corp, shareholder.userId));
+    return holder ? holder.name : null;
+}
+
+function sharesForUi(corp, userId) {
+    const holder = (corp.shareholders || []).find(shareholder => shareholder.userId === userId);
+    return Number(holder?.shares || 0);
+}
+
+function hasMajoritySharesUi(corp, userId) {
+    return sharesForUi(corp, userId) > Number(corp.totalShares || 0) / 2;
+}
+
+function majorityThresholdUi(corp) {
+    return Math.floor(Number(corp.totalShares || 0) / 2) + 1;
+}
+
+function voteSupportSharesUi(corp, vote) {
+    return (vote.supporters || []).reduce((sum, supporter) => sum + sharesForUi(corp, supporter.userId), 0);
+}
+
+async function changeChairmanByMajority(corpId) {
+    const candidateUserId = document.getElementById(`chairmanMajority-${corpId}`).value;
+    try {
+        await performGameAction('change_chairman', { corpId, candidateUserId });
+        await openCorporationModal();
+    } catch (error) {
+        console.error('Error changing chairman:', error);
+        alert('Failed to change chairman');
+    }
+}
+
+async function proposeChairmanVote(corpId) {
+    const candidateUserId = document.getElementById(`chairmanVoteCandidate-${corpId}`).value;
+    try {
+        await performGameAction('propose_chairman_vote', { corpId, candidateUserId });
+        await openCorporationModal();
+    } catch (error) {
+        console.error('Error proposing chairman vote:', error);
+        alert('Failed to propose chairman vote');
+    }
+}
+
+async function supportChairmanVote(corpId, voteId) {
+    try {
+        await performGameAction('support_chairman_vote', { corpId, voteId });
+        await openCorporationModal();
+    } catch (error) {
+        console.error('Error supporting chairman vote:', error);
+        alert('Failed to support chairman vote');
+    }
+}
+
 async function buyShares(corpId) {
     const gameState = currentGame.game_state;
     const corp = gameState.corporations.find(c => c.id === corpId);
@@ -701,7 +970,7 @@ async function buyShares(corpId) {
     const totalCost = numShares * corp.pricePerShare;
         const sharesAvailable = typeof corp.availableShares === 'number'
             ? corp.availableShares
-            : corp.totalShares - corp.shareholders.reduce((sum, s) => sum + s.shares, 0);
+            : corp.totalShares - (corp.shareholders || []).reduce((sum, s) => sum + s.shares, 0);
 
     if (!numShares || numShares < 1 || numShares > sharesAvailable) {
         alert(`Enter a valid number of shares (1–${sharesAvailable})`);
@@ -835,7 +1104,10 @@ function showWinnerFromState(gameState, reason) {
         netWorth: player.netWorth || player.cash,
         bankrupt: player.bankrupt
     })).sort((a, b) => b.netWorth - a.netWorth);
-    if (isHotseatMode) sessionStorage.removeItem('hotseat_tokens');
+    if (isHotseatMode) {
+        sessionStorage.removeItem('hotseat_tokens');
+        if (currentRoom && currentRoom.invite_code) clearHotseatResume(currentRoom.invite_code);
+    }
     const winner = standings[0];
     const standingsHtml = standings.map((p, i) => `
         <div class="standings-row ${p.bankrupt ? 'bankrupt' : ''}">

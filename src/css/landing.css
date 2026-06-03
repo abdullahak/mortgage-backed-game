@@ -371,6 +371,47 @@ body {
   display: none;
 }
 
+.hotseat-resume-options {
+  display: none;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255,255,255,0.1);
+}
+
+.hotseat-resume-options h4 {
+  color: white;
+  font-size: 0.95rem;
+  margin-bottom: 0.35rem;
+}
+
+.hotseat-resume-hint {
+  color: rgba(255,255,255,0.58);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  margin-bottom: 0.7rem;
+}
+
+.hotseat-resume-main {
+  width: 100%;
+  margin-bottom: 0.8rem;
+}
+
+.hotseat-player-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.hotseat-player-options .hotseat-resume-hint {
+  flex-basis: 100%;
+  margin-bottom: 0.1rem;
+}
+
+.hotseat-player-option {
+  flex: 1 1 calc(50% - 0.45rem);
+  min-width: 120px;
+}
+
 .forgot-link {
   display: inline-block;
   margin-top: 0.8rem;

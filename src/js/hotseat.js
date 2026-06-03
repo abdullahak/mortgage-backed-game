@@ -127,6 +127,7 @@ async function startHotseatGame() {
 
         // 7. Store all player tokens in sessionStorage for game.js to pick up
         sessionStorage.setItem('hotseat_tokens', JSON.stringify(tokenRecords));
+        saveHotseatResume(room, tokenRecords);
 
         // 8. Navigate to the game
         window.location.href = `game.html?room=${roomId}`;

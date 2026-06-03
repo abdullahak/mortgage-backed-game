@@ -49,6 +49,8 @@ function showGuestJoinSection() {
     const codeInput = document.getElementById('guest-room-code');
     if (codeInput) codeInput.value = roomCode.toUpperCase();
 
+    renderHotseatResumeOptions(document.getElementById('hotseat-resume-options'), roomCode);
+
     const nameInput = document.getElementById('guest-player-name');
     if (nameInput) {
         nameInput.addEventListener('keypress', (e) => {

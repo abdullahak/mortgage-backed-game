@@ -129,6 +129,17 @@ body {
     border-color: #40916C;
 }
 
+.readonly-value {
+    width: 100%;
+    max-width: 400px;
+    padding: 12px;
+    border: 2px solid #ecf0f1;
+    border-radius: 8px;
+    background: #f8faf9;
+    color: #2c3e50;
+    font-weight: 700;
+}
+
 .form-group small {
     display: block;
     margin-top: 5px;
@@ -443,6 +454,49 @@ body {
     margin-bottom: 15px;
 }
 
+.chairman-governance {
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid #dce6e0;
+    border-radius: 8px;
+    background: #f8faf9;
+}
+
+.governance-control,
+.chairman-vote-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.governance-control label {
+    grid-column: 1 / -1;
+    color: #2c3e50;
+    font-weight: 700;
+}
+
+.governance-control select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #dce6e0;
+    border-radius: 8px;
+}
+
+.chairman-vote-row {
+    padding: 8px;
+    border: 1px solid #e1e8e5;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.chairman-vote-row span {
+    display: block;
+    color: #5f6f69;
+    font-size: 0.85rem;
+}
+
 /* Auth specific styles */
 .auth-content {
     display: flex;
@@ -521,6 +575,48 @@ body {
 
 .error-message.active {
     display: block;
+}
+
+.hotseat-resume-options {
+    display: none;
+    margin-bottom: 20px;
+    padding: 16px;
+    border: 1px solid #d8eee4;
+    border-radius: 8px;
+    background: #f6fbf8;
+}
+
+.hotseat-resume-options h4 {
+    color: #2c3e50;
+    margin-bottom: 6px;
+}
+
+.hotseat-resume-hint {
+    color: #5f6f68;
+    font-size: 0.9em;
+    line-height: 1.45;
+    margin-bottom: 10px;
+}
+
+.hotseat-resume-main {
+    width: 100%;
+    margin: 0 0 12px 0;
+}
+
+.hotseat-player-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.hotseat-player-options .hotseat-resume-hint {
+    flex-basis: 100%;
+    margin: 0;
+}
+
+.hotseat-player-option {
+    flex: 1 1 140px;
+    margin: 0;
 }
 
 /* Lobby specific styles */
@@ -825,6 +921,29 @@ body {
     background: #f0fbf5;
 }
 
+.card-effect-summary {
+    margin-top: 8px;
+    padding: 10px 14px;
+    border: 1px solid #d5dde5;
+    border-left: 4px solid #64748b;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #2c3e50;
+}
+
+.card-effect-summary span {
+    display: inline-block;
+    margin-right: 8px;
+    color: #687782;
+    font-size: 0.9em;
+    font-weight: 700;
+}
+
+.card-effect-summary p {
+    margin: 4px 0 0;
+    color: #4a5560;
+}
+
 .landing-summary .landing-label {
     display: inline-block;
     margin-right: 8px;
@@ -861,6 +980,40 @@ body {
     opacity: 0.62;
     box-shadow: none;
     filter: grayscale(0.25);
+}
+
+.cash-flow-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.cash-flow-summary div {
+    background: #f8faf9;
+    border: 1px solid #e1e8e5;
+    border-radius: 8px;
+    padding: 8px;
+}
+
+.cash-flow-summary span,
+.debt-badge span,
+.corp-assets-owned {
+    display: block;
+    color: #5f6f69;
+    font-size: 0.82rem;
+    line-height: 1.25;
+}
+
+.cash-flow-summary strong {
+    display: block;
+    margin-top: 3px;
+    color: #20352d;
+}
+
+.empty-state {
+    color: #687782;
+    margin: 6px 0;
 }
 
 .recent-log {

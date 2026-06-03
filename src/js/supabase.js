@@ -83,6 +83,136 @@ async function handleLogout() {
 // Room helpers
 // ----------------------------------------------------------------
 
+const HOTSEAT_RESUME_STORAGE_KEY = 'mortgage_hotseat_resume_rooms';
+
+function getHotseatResumeRooms() {
+    try {
+        return JSON.parse(localStorage.getItem(HOTSEAT_RESUME_STORAGE_KEY) || '{}');
+    } catch {
+        return {};
+    }
+}
+
+function saveHotseatResume(room, tokenRecords) {
+    if (!room || !room.invite_code || !Array.isArray(tokenRecords) || tokenRecords.length === 0) return;
+
+    const rooms = getHotseatResumeRooms();
+    const code = room.invite_code.toUpperCase();
+    rooms[code] = {
+        roomId: room.id,
+        inviteCode: code,
+        tokens: tokenRecords,
+        savedAt: new Date().toISOString()
+    };
+    localStorage.setItem(HOTSEAT_RESUME_STORAGE_KEY, JSON.stringify(rooms));
+}
+
+function getHotseatResumeByCode(inviteCode) {
+    const code = String(inviteCode || '').trim().toUpperCase();
+    if (!code) return null;
+
+    const resume = getHotseatResumeRooms()[code];
+    if (!resume || !resume.roomId || !Array.isArray(resume.tokens) || resume.tokens.length === 0) {
+        return null;
+    }
+    return resume;
+}
+
+function restoreHotseatResume(resume) {
+    if (!resume || !resume.roomId || !Array.isArray(resume.tokens) || resume.tokens.length === 0) {
+        return false;
+    }
+
+    sessionStorage.setItem('hotseat_tokens', JSON.stringify(resume.tokens));
+    localStorage.setItem('auth_token', resume.tokens[0].token);
+    return true;
+}
+
+function restoreHotseatPlayer(resume, userId) {
+    if (!resume || !Array.isArray(resume.tokens)) return false;
+
+    const player = resume.tokens.find(record => record.userId === userId);
+    if (!player || !player.token) return false;
+
+    sessionStorage.removeItem('hotseat_tokens');
+    localStorage.setItem('auth_token', player.token);
+    return true;
+}
+
+function continueHotseatMode(inviteCode) {
+    const resume = getHotseatResumeByCode(inviteCode);
+    if (!resume || !restoreHotseatResume(resume)) return false;
+
+    window.location.href = `game.html?room=${encodeURIComponent(resume.roomId)}`;
+    return true;
+}
+
+function continueHotseatOnline(inviteCode, userId) {
+    const resume = getHotseatResumeByCode(inviteCode);
+    if (!resume || !restoreHotseatPlayer(resume, userId)) return false;
+
+    window.location.href = `game.html?room=${encodeURIComponent(resume.roomId)}`;
+    return true;
+}
+
+function renderHotseatResumeOptions(container, inviteCode) {
+    if (!container) return false;
+
+    const resume = getHotseatResumeByCode(inviteCode);
+    if (!resume) {
+        container.innerHTML = '';
+        container.style.display = 'none';
+        return false;
+    }
+
+    container.innerHTML = '';
+    container.style.display = 'block';
+
+    const title = document.createElement('h4');
+    title.textContent = 'Continue this saved hotseat game';
+    container.appendChild(title);
+
+    const modeText = document.createElement('p');
+    modeText.className = 'hotseat-resume-hint';
+    modeText.textContent = 'Use local hotseat on this device, or continue online as one player.';
+    container.appendChild(modeText);
+
+    const hotseatButton = document.createElement('button');
+    hotseatButton.type = 'button';
+    hotseatButton.className = 'btn btn-primary hotseat-resume-main';
+    hotseatButton.textContent = 'Continue Hotseat';
+    hotseatButton.addEventListener('click', () => continueHotseatMode(inviteCode));
+    container.appendChild(hotseatButton);
+
+    const playerList = document.createElement('div');
+    playerList.className = 'hotseat-player-options';
+    const playerLabel = document.createElement('p');
+    playerLabel.className = 'hotseat-resume-hint';
+    playerLabel.textContent = 'Continue online as:';
+    playerList.appendChild(playerLabel);
+
+    resume.tokens.forEach(record => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-secondary btn-sm hotseat-player-option';
+        button.textContent = record.name || 'Player';
+        button.addEventListener('click', () => continueHotseatOnline(inviteCode, record.userId));
+        playerList.appendChild(button);
+    });
+
+    container.appendChild(playerList);
+    return true;
+}
+
+function clearHotseatResume(inviteCode) {
+    const code = String(inviteCode || '').trim().toUpperCase();
+    if (!code) return;
+
+    const rooms = getHotseatResumeRooms();
+    delete rooms[code];
+    localStorage.setItem(HOTSEAT_RESUME_STORAGE_KEY, JSON.stringify(rooms));
+}
+
 async function createNewRoom(roomName, maxPlayers, playerName) {
     return apiFetch('/rooms', {
         method: 'POST',

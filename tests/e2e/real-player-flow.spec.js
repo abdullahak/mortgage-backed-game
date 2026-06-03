@@ -75,7 +75,7 @@ test.describe('thorough real-player UI game flow', () => {
             await shot(testInfo, pages.Alice, '10-alice-buys-houses-on-brown');
 
             await openTab(pages.Alice, 'Game');
-            await issueDebt(pages.Alice, 300, 8);
+            await issueDebt(pages.Alice, 300, 5);
             await shot(testInfo, pages.Alice, '11-alice-issues-collateralized-debt');
 
             await settleDebt(pages.Alice, 75);
@@ -84,11 +84,32 @@ test.describe('thorough real-player UI game flow', () => {
             await createIpo(pages.Alice, 'BRWN', 8, 50, 'prop-0');
             await shot(testInfo, pages.Alice, '13-alice-creates-ipo');
 
+            await expectCorporationDetails(pages.Alice, 'BRWN', /No public shares sold yet/i);
+            await issueCorporationDebt(pages.Alice, 'BRWN', 100);
+            await shot(testInfo, pages.Alice, '13b-alice-issues-corporation-debt');
+
             await endTurnNoAssert(pages.Alice);
             await repairGameState(pages.Alice, { current: 'Bob', diceRolled: { Bob: false } });
             await reloadGamePages(pages, ['Bob']);
             await buyShares(pages.Bob, 'BRWN', 2);
             await shot(testInfo, pages.Bob, '14-bob-buys-ipo-shares-mobile');
+
+            await repairGameState(pages.Alice, {
+                corporations: {
+                    BRWN: {
+                        shareholders: [
+                            { name: 'Bob', shares: 3 },
+                            { name: 'Carol', shares: 3 },
+                        ],
+                        availableShares: 2,
+                    },
+                },
+            });
+            await reloadGamePages(pages, ['Bob', 'Carol']);
+            await proposeChairmanVote(pages.Bob, 'BRWN', 'Bob');
+            await supportChairmanVote(pages.Carol, 'BRWN');
+            await expectCorporationDetails(pages.Carol, 'BRWN', /Chairman:\s*Bob/i);
+            await shot(testInfo, pages.Carol, '14b-carol-supports-chairman-vote');
 
             await tradeCashForProperty(pages.Bob, 'Bob', 'Alice', 120, 'prop-1');
             await shot(testInfo, pages.Bob, '15-bob-trades-cash-for-property');
@@ -133,6 +154,7 @@ test.describe('thorough real-player UI game flow', () => {
             });
             await reloadGamePages(pages, ['Carol']);
             await rollWithDiceAndExpect(pages.Carol, [1, 3], /drew card: Pay a poor tax of \$15/i);
+            await expect(pages.Carol.locator('.card-effect-summary')).toContainText(/Applied: paid \$15\.00/i);
             await shot(testInfo, pages.Carol, '21-carol-draws-chance-card');
 
             await endTurnNoAssert(pages.Carol);
@@ -271,7 +293,10 @@ async function buyCurrentSquare(page, expectedText) {
     await activeGameButton(page, 'openBuyPropertyModal()').click();
     await expect(page.locator('#buyPropertyModal')).toBeVisible();
     await expect(page.locator('#availableProperties')).toContainText(expectedText, { timeout: 10000 });
+    await expect(page.locator('#purchasePriceDisplay')).toContainText(/\$\d+\.\d{2}/);
+    await expect(page.locator('#purchasePrice')).toHaveAttribute('type', 'hidden');
     await clickAndWaitForGameVersion(page, page.locator('#buyPropertyModal button[onclick="confirmPurchase()"]'));
+    await expect(page.locator('#buyPropertyModal')).toBeHidden({ timeout: 10000 });
     await expect(page.locator('#gameContent')).toContainText(expectedText, { timeout: 10000 });
 }
 
@@ -292,9 +317,12 @@ async function issueDebt(page, amount, rate) {
     const collateral = page.locator('#collateralAssets input[type="checkbox"]').first();
     if (await collateral.count()) await collateral.check();
     await page.locator('#loanAmount').fill(String(amount));
-    await page.locator('#loanRate').fill(String(rate));
+    await expect(page.locator('#loanRateDisplay')).toContainText(`${rate}%`);
+    await expect(page.locator('#loanRate')).toHaveAttribute('type', 'hidden');
     await clickAndWaitForGameVersion(page, page.locator('#debtModal button[onclick="processDebt()"]'));
+    await expect(page.locator('#debtModal')).toBeHidden({ timeout: 10000 });
     await expect(page.locator('#gameContent')).toContainText(new RegExp(`\\$${amount}\\.00 @ ${rate}%`), { timeout: 10000 });
+    await expect(page.locator('#gameContent')).toContainText(/Interest next turn:/, { timeout: 10000 });
 }
 
 async function settleDebt(page, amount) {
@@ -303,6 +331,7 @@ async function settleDebt(page, amount) {
     await page.locator('#debtAction').selectOption('settle');
     await page.locator('#settlementAmount').fill(String(amount));
     await clickAndWaitForGameVersion(page, page.locator('#debtModal button[onclick="processDebt()"]'));
+    await expect(page.locator('#debtModal')).toBeHidden({ timeout: 10000 });
     await expect(page.locator('#gameContent')).toContainText(/Debts:/, { timeout: 10000 });
 }
 
@@ -316,6 +345,55 @@ async function createIpo(page, ticker, shares, price, assetId) {
     await page.locator(`#ipo-asset-${assetId}`).check();
     await clickAndWaitForGameVersion(page, page.locator('#ipoModal button[onclick="createIPO()"]'));
     await expect(page.locator('#gameContent')).toContainText(ticker, { timeout: 10000 });
+}
+
+async function expectCorporationDetails(page, ticker, shareholderText) {
+    await openTab(page, 'Game');
+    await activeGameButton(page, 'openCorporationModal()').click();
+    const card = page.locator('.corporation-card').filter({ hasText: ticker }).first();
+    await expect(card).toBeVisible({ timeout: 10000 });
+    await expect(card).toContainText(/Chairman:/i);
+    await expect(card).toContainText(/Treasury Cash:/i);
+    await expect(card).toContainText(shareholderText);
+    await page.locator('#corporationModal').getByRole('button', { name: /close/i }).click();
+    await expect(page.locator('#corporationModal')).toBeHidden({ timeout: 10000 });
+}
+
+async function issueCorporationDebt(page, ticker, amount) {
+    await openTab(page, 'Game');
+    await activeGameButton(page, 'openDebtModal()').click();
+    await expect(page.locator('#debtModal')).toBeVisible();
+    await selectByVisibleText(page.locator('#debtIssuer'), `${ticker} Corporation`);
+    const collateral = page.locator('#collateralAssets input[type="checkbox"]').first();
+    if (await collateral.count()) await collateral.check();
+    await page.locator('#loanAmount').fill(String(amount));
+    await clickAndWaitForGameVersion(page, page.locator('#debtModal button[onclick="processDebt()"]'));
+    await expect(page.locator('#debtModal')).toBeHidden({ timeout: 10000 });
+    await expect(page.locator('#gameContent')).toContainText(new RegExp(`issued debt under ${ticker}`, 'i'), { timeout: 10000 });
+}
+
+async function proposeChairmanVote(page, ticker, candidateName) {
+    await openTab(page, 'Game');
+    await activeGameButton(page, 'openCorporationModal()').click();
+    await expect(page.locator('#corporationModal')).toBeVisible();
+    const card = page.locator('.corporation-card').filter({ hasText: ticker }).first();
+    await selectByVisibleText(card.locator('select[id^="chairmanVoteCandidate-"]'), candidateName);
+    await clickAndWaitForGameVersion(page, card.getByRole('button', { name: /propose/i }));
+    await expect(card).toContainText(candidateName, { timeout: 10000 });
+    await expect(card).toContainText(/3\/8 shares supporting/i, { timeout: 10000 });
+    await page.locator('#corporationModal').getByRole('button', { name: /close/i }).click();
+    await expect(page.locator('#corporationModal')).toBeHidden({ timeout: 10000 });
+}
+
+async function supportChairmanVote(page, ticker) {
+    await openTab(page, 'Game');
+    await activeGameButton(page, 'openCorporationModal()').click();
+    await expect(page.locator('#corporationModal')).toBeVisible();
+    const card = page.locator('.corporation-card').filter({ hasText: ticker }).first();
+    await clickAndWaitForGameVersion(page, card.getByRole('button', { name: /support/i }).first());
+    await expect(card).toContainText(/Chairman:\s*Bob/i, { timeout: 10000 });
+    await page.locator('#corporationModal').getByRole('button', { name: /close/i }).click();
+    await expect(page.locator('#corporationModal')).toBeHidden({ timeout: 10000 });
 }
 
 async function buyShares(page, ticker, shares) {
@@ -461,6 +539,21 @@ async function repairGameState(hostPage, patch) {
                 const player = byName(name);
                 if (!player) return;
                 Object.assign(player, changes);
+            });
+        }
+        if (patch.corporations) {
+            Object.entries(patch.corporations).forEach(([ticker, changes]) => {
+                const corp = state.corporations.find(item => item.ticker === ticker);
+                if (!corp) return;
+                if (changes.shareholders) {
+                    corp.shareholders = changes.shareholders.map(holder => {
+                        const player = byName(holder.name);
+                        return { userId: player.userId, name: player.name, shares: holder.shares };
+                    });
+                }
+                Object.entries(changes).forEach(([key, value]) => {
+                    if (key !== 'shareholders') corp[key] = value;
+                });
             });
         }
         if (patch.chanceCards) state.chanceCards = patch.chanceCards;
