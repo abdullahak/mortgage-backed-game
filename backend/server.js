@@ -9,6 +9,7 @@ const { router: authRouter } = require('./routes/auth');
 
 const config = getConfig();
 const PORT = config.port;
+const HOST = config.host;
 const JWT_SECRET = config.jwtSecret;
 
 const app = express();
@@ -69,8 +70,8 @@ io.on('connection', (socket) => {
 
 
 if (require.main === module) {
-    server.listen(PORT, () => {
-        console.log(`Mortgage Backed Game backend running env=${config.env} port=${PORT} db=${config.dbPath}`);
+    server.listen(PORT, HOST, () => {
+        console.log(`Mortgage Backed Game backend running env=${config.env} host=${HOST} port=${PORT} db=${config.dbPath}`);
     });
 }
 

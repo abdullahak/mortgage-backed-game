@@ -27,6 +27,7 @@ function getConfig() {
     loadDotEnv();
     const env = process.env.APP_ENV || process.env.NODE_ENV || 'development';
     const port = Number(process.env.PORT || 3000);
+    const host = process.env.HOST || process.env.BIND_HOST || (isProduction() ? '127.0.0.1' : '0.0.0.0');
     const jwtSecret = process.env.JWT_SECRET || DEFAULT_DEV_SECRET;
     const dbPath = process.env.DB_PATH || (process.env.NODE_ENV === 'test'
         ? ':memory:'
@@ -44,12 +45,16 @@ function getConfig() {
         if (corsOrigins.length === 0 || corsOrigins.includes('*')) {
             throw new Error('CORS_ORIGINS must be explicit in production');
         }
+        if (host !== '127.0.0.1' && host !== 'localhost') {
+            throw new Error('Production HOST/BIND_HOST must be 127.0.0.1');
+        }
     }
 
     return {
         env,
         isProduction: isProduction(),
         port,
+        host,
         jwtSecret,
         jwtExpiry: process.env.JWT_EXPIRY || (isProduction() ? '12h' : '30d'),
         dbPath,
