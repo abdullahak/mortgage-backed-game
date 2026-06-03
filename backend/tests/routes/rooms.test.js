@@ -226,6 +226,61 @@ describe('POST /api/rooms/by-code/:code/claim-member', () => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/rooms/by-code/:code/claim-hotseat
+// ---------------------------------------------------------------------------
+describe('POST /api/rooms/by-code/:code/claim-hotseat', () => {
+    test('200 returns tokens for all existing members when room is full', async () => {
+        const { createRoomFixture } = require('../helpers/fixtures');
+        const room = createRoomFixture(db, user1.id, { inviteCode: 'HSEAT1', maxPlayers: 2 });
+        db.prepare(`
+            INSERT INTO room_members (id, room_id, user_id, player_name)
+            VALUES (?, ?, ?, ?)
+        `).run('member-bob-hotseat', room.id, user2.id, 'Bob');
+
+        const res = await request(app)
+            .post('/api/rooms/by-code/HSEAT1/claim-hotseat')
+            .send({});
+
+        expect(res.status).toBe(200);
+        expect(res.body.tokens).toHaveLength(2);
+        expect(res.body.tokens.map(record => record.name).sort()).toEqual(['Bob', 'Host']);
+        expect(res.body.tokens.every(record => record.token && record.userId)).toBe(true);
+
+        const bobToken = res.body.tokens.find(record => record.name === 'Bob').token;
+        const me = await request(app)
+            .get('/api/auth/me')
+            .set('Authorization', `Bearer ${bobToken}`);
+        expect(me.status).toBe(200);
+        expect(me.body.id).toBe(user2.id);
+    });
+
+    test('200 returns tokens for all existing members when room is in progress', async () => {
+        const { createRoomFixture } = require('../helpers/fixtures');
+        const room = createRoomFixture(db, user1.id, { inviteCode: 'HSEAT2', status: 'in_progress', maxPlayers: 4 });
+
+        const res = await request(app)
+            .post('/api/rooms/by-code/hseat2/claim-hotseat')
+            .send({});
+
+        expect(res.status).toBe(200);
+        expect(res.body.tokens).toHaveLength(1);
+        expect(res.body.room.status).toBe('in_progress');
+    });
+
+    test('400 rejects hotseat claims while room is still open for new players', async () => {
+        const { createRoomFixture } = require('../helpers/fixtures');
+        createRoomFixture(db, user1.id, { inviteCode: 'HOPEN1', maxPlayers: 4 });
+
+        const res = await request(app)
+            .post('/api/rooms/by-code/HOPEN1/claim-hotseat')
+            .send({});
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/still open/);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/rooms/mine
 // ---------------------------------------------------------------------------
 describe('GET /api/rooms/mine', () => {

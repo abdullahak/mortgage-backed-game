@@ -89,6 +89,30 @@ router.post('/by-code/:code/claim-member', (req, res) => {
     });
 });
 
+// POST /api/rooms/by-code/:code/claim-hotseat — resume all existing room
+// members in local hotseat mode.
+router.post('/by-code/:code/claim-hotseat', (req, res) => {
+    const room = getRoomByInviteCode(req.params.code);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+
+    const members = db.prepare(`SELECT * FROM room_members WHERE room_id = ? ORDER BY joined_at ASC`).all(room.id);
+    const roomIsClosedToNewMembers = room.status !== 'waiting' || members.length >= room.max_players;
+    if (!roomIsClosedToNewMembers) {
+        return res.status(400).json({ error: 'Room is still open for new players' });
+    }
+
+    const tokens = members.map(member => ({
+        userId: member.user_id,
+        token: makeToken(member.user_id),
+        name: member.player_name
+    }));
+
+    res.json({
+        room: { ...room, room_members: members },
+        tokens
+    });
+});
+
 // GET /api/rooms/mine — rooms the current user is in
 router.get('/mine', requireAuth, (req, res) => {
     const memberships = db.prepare(`

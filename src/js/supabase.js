@@ -219,11 +219,22 @@ function renderExistingRoomMemberOptions(container, inviteCode, room) {
 
     const hint = document.createElement('p');
     hint.className = 'hotseat-resume-hint';
-    hint.textContent = 'This room is already full. Choose which player you are to continue.';
+    hint.textContent = 'This room is already full. Continue local hotseat, or choose one player for online mode.';
     container.appendChild(hint);
+
+    const hotseatButton = document.createElement('button');
+    hotseatButton.type = 'button';
+    hotseatButton.className = 'btn btn-primary hotseat-resume-main';
+    hotseatButton.textContent = 'Continue Hotseat';
+    hotseatButton.addEventListener('click', () => continueExistingRoomHotseat(inviteCode));
+    container.appendChild(hotseatButton);
 
     const playerList = document.createElement('div');
     playerList.className = 'hotseat-player-options';
+    const playerLabel = document.createElement('p');
+    playerLabel.className = 'hotseat-resume-hint';
+    playerLabel.textContent = 'Continue online as:';
+    playerList.appendChild(playerLabel);
 
     room.room_members.forEach(member => {
         const button = document.createElement('button');
@@ -272,12 +283,33 @@ async function claimRoomMemberByCode(inviteCode, memberId) {
     });
 }
 
+async function claimRoomHotseatByCode(inviteCode) {
+    return apiFetch(`/rooms/by-code/${inviteCode.toUpperCase()}/claim-hotseat`, {
+        method: 'POST'
+    });
+}
+
 async function continueExistingRoomMember(inviteCode, memberId) {
     const data = await claimRoomMemberByCode(inviteCode, memberId);
     localStorage.setItem('auth_token', data.token);
     sessionStorage.removeItem('hotseat_tokens');
 
     const room = data.room;
+    window.location.href = room.status === 'in_progress'
+        ? `game.html?room=${encodeURIComponent(room.id)}`
+        : `waiting.html?room=${encodeURIComponent(room.id)}`;
+}
+
+async function continueExistingRoomHotseat(inviteCode) {
+    const data = await claimRoomHotseatByCode(inviteCode);
+    const room = data.room;
+    const tokens = data.tokens || [];
+    if (tokens.length === 0) throw new Error('No players found for hotseat resume');
+
+    sessionStorage.setItem('hotseat_tokens', JSON.stringify(tokens));
+    localStorage.setItem('auth_token', tokens[0].token);
+    saveHotseatResume(room, tokens);
+
     window.location.href = room.status === 'in_progress'
         ? `game.html?room=${encodeURIComponent(room.id)}`
         : `waiting.html?room=${encodeURIComponent(room.id)}`;
