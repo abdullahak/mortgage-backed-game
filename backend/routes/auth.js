@@ -130,7 +130,7 @@ router.post('/signout', requireAuth, (req, res) => {
     res.json({ ok: true });
 });
 
-module.exports = { router, requireAuth };
+module.exports = { router, requireAuth, makeToken };
 
 function toSqliteDate(date) {
     return date.toISOString().replace('T', ' ').slice(0, 19);

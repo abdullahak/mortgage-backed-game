@@ -14,7 +14,7 @@ const roomCode = urlParams.get('code'); // unauthenticated join path
 async function initWaitingRoom() {
     if (roomCode) {
         // Guest join path: show name form, sign in anonymously after submission
-        showGuestJoinSection();
+        await showGuestJoinSection();
         return;
     }
 
@@ -40,7 +40,7 @@ async function initWaitingRoom() {
 }
 
 // Show guest join UI
-function showGuestJoinSection() {
+async function showGuestJoinSection() {
     document.getElementById('waiting-room-section').style.display = 'none';
     document.getElementById('guest-join-section').style.display = 'block';
     const leaveBtn = document.getElementById('leave-room-btn');
@@ -49,7 +49,20 @@ function showGuestJoinSection() {
     const codeInput = document.getElementById('guest-room-code');
     if (codeInput) codeInput.value = roomCode.toUpperCase();
 
-    renderHotseatResumeOptions(document.getElementById('hotseat-resume-options'), roomCode);
+    const optionsEl = document.getElementById('hotseat-resume-options');
+    const hasLocalHotseatResume = renderHotseatResumeOptions(optionsEl, roomCode);
+    if (!hasLocalHotseatResume) {
+        try {
+            const room = await apiFetch(`/rooms/by-code/${roomCode.toUpperCase()}`);
+            const hasExistingPlayerResume = renderExistingRoomMemberOptions(optionsEl, roomCode, room);
+            setGuestJoinFormVisible(!hasExistingPlayerResume);
+        } catch (err) {
+            console.warn('Could not load room resume options:', err);
+            setGuestJoinFormVisible(true);
+        }
+    } else {
+        setGuestJoinFormVisible(false);
+    }
 
     const nameInput = document.getElementById('guest-player-name');
     if (nameInput) {
@@ -57,6 +70,13 @@ function showGuestJoinSection() {
             if (e.key === 'Enter') joinAsGuest();
         });
     }
+}
+
+function setGuestJoinFormVisible(visible) {
+    const nameGroup = document.getElementById('guest-player-name')?.closest('.form-group');
+    const joinBtn = document.getElementById('guest-join-btn');
+    if (nameGroup) nameGroup.style.display = visible ? '' : 'none';
+    if (joinBtn) joinBtn.style.display = visible ? '' : 'none';
 }
 
 // Guest joins with anonymous session

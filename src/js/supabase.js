@@ -204,6 +204,40 @@ function renderHotseatResumeOptions(container, inviteCode) {
     return true;
 }
 
+function renderExistingRoomMemberOptions(container, inviteCode, room) {
+    if (!container || !room || !Array.isArray(room.room_members)) return false;
+
+    const roomIsClosedToNewMembers = room.status !== 'waiting' || room.room_members.length >= room.max_players;
+    if (!roomIsClosedToNewMembers) return false;
+
+    container.innerHTML = '';
+    container.style.display = 'block';
+
+    const title = document.createElement('h4');
+    title.textContent = 'Continue as an existing player';
+    container.appendChild(title);
+
+    const hint = document.createElement('p');
+    hint.className = 'hotseat-resume-hint';
+    hint.textContent = 'This room is already full. Choose which player you are to continue.';
+    container.appendChild(hint);
+
+    const playerList = document.createElement('div');
+    playerList.className = 'hotseat-player-options';
+
+    room.room_members.forEach(member => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-secondary btn-sm hotseat-player-option';
+        button.textContent = member.player_name || 'Player';
+        button.addEventListener('click', () => continueExistingRoomMember(inviteCode, member.id));
+        playerList.appendChild(button);
+    });
+
+    container.appendChild(playerList);
+    return true;
+}
+
 function clearHotseatResume(inviteCode) {
     const code = String(inviteCode || '').trim().toUpperCase();
     if (!code) return;
@@ -229,6 +263,24 @@ async function joinRoomByCode(inviteCode, playerName) {
         method: 'POST',
         body: JSON.stringify({ player_name: playerName })
     });
+}
+
+async function claimRoomMemberByCode(inviteCode, memberId) {
+    return apiFetch(`/rooms/by-code/${inviteCode.toUpperCase()}/claim-member`, {
+        method: 'POST',
+        body: JSON.stringify({ member_id: memberId })
+    });
+}
+
+async function continueExistingRoomMember(inviteCode, memberId) {
+    const data = await claimRoomMemberByCode(inviteCode, memberId);
+    localStorage.setItem('auth_token', data.token);
+    sessionStorage.removeItem('hotseat_tokens');
+
+    const room = data.room;
+    window.location.href = room.status === 'in_progress'
+        ? `game.html?room=${encodeURIComponent(room.id)}`
+        : `waiting.html?room=${encodeURIComponent(room.id)}`;
 }
 
 async function getUserRooms() {

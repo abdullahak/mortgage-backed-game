@@ -1,7 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
-const { requireAuth } = require('./auth');
+const { requireAuth, makeToken } = require('./auth');
 const { sendEmail } = require('../mailer');
 
 module.exports = (io) => {
@@ -18,6 +18,10 @@ function getRoomWithMembers(roomId) {
 
 function isRoomMember(roomId, userId) {
     return !!db.prepare(`SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ?`).get(roomId, userId);
+}
+
+function getRoomByInviteCode(code) {
+    return db.prepare(`SELECT * FROM rooms WHERE invite_code = ?`).get(String(code || '').toUpperCase());
 }
 
 // POST /api/rooms — create room
@@ -50,10 +54,39 @@ router.post('/', requireAuth, (req, res) => {
 
 // GET /api/rooms/by-code/:code — find room by invite code
 router.get('/by-code/:code', (req, res) => {
-    const room = db.prepare(`SELECT * FROM rooms WHERE invite_code = ?`).get(req.params.code.toUpperCase());
+    const room = getRoomByInviteCode(req.params.code);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     const members = db.prepare(`SELECT * FROM room_members WHERE room_id = ? ORDER BY joined_at ASC`).all(room.id);
     res.json({ ...room, room_members: members });
+});
+
+// POST /api/rooms/by-code/:code/claim-member — resume as an existing room member.
+// This supports hotseat rooms filled with local anonymous players before the
+// browser had persistent token recovery.
+router.post('/by-code/:code/claim-member', (req, res) => {
+    const { member_id } = req.body;
+    const room = getRoomByInviteCode(req.params.code);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    if (!member_id) return res.status(400).json({ error: 'member_id required' });
+
+    const members = db.prepare(`SELECT * FROM room_members WHERE room_id = ? ORDER BY joined_at ASC`).all(room.id);
+    const roomIsClosedToNewMembers = room.status !== 'waiting' || members.length >= room.max_players;
+    if (!roomIsClosedToNewMembers) {
+        return res.status(400).json({ error: 'Room is still open for new players' });
+    }
+
+    const member = members.find(item => item.id === member_id);
+    if (!member) return res.status(404).json({ error: 'Player not found in this room' });
+
+    const user = db.prepare(`SELECT id, email, is_anonymous FROM users WHERE id = ?`).get(member.user_id);
+    if (!user) return res.status(404).json({ error: 'Player account not found' });
+
+    res.json({
+        token: makeToken(user.id),
+        user,
+        member,
+        room: { ...room, room_members: members }
+    });
 });
 
 // GET /api/rooms/mine — rooms the current user is in

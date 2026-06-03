@@ -161,6 +161,71 @@ describe('GET /api/rooms/by-code/:code', () => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/rooms/by-code/:code/claim-member
+// ---------------------------------------------------------------------------
+describe('POST /api/rooms/by-code/:code/claim-member', () => {
+    test('200 returns a token for an existing member when room is full', async () => {
+        const { createRoomFixture } = require('../helpers/fixtures');
+        const room = createRoomFixture(db, user1.id, { inviteCode: 'CLAIM1', maxPlayers: 2 });
+        db.prepare(`
+            INSERT INTO room_members (id, room_id, user_id, player_name)
+            VALUES (?, ?, ?, ?)
+        `).run('member-bob', room.id, user2.id, 'Bob');
+
+        const res = await request(app)
+            .post('/api/rooms/by-code/CLAIM1/claim-member')
+            .send({ member_id: 'member-bob' });
+
+        expect(res.status).toBe(200);
+        expect(res.body.user.id).toBe(user2.id);
+        expect(res.body.member.player_name).toBe('Bob');
+        expect(res.body.token).toBeTruthy();
+
+        const me = await request(app)
+            .get('/api/auth/me')
+            .set('Authorization', `Bearer ${res.body.token}`);
+        expect(me.status).toBe(200);
+        expect(me.body.id).toBe(user2.id);
+    });
+
+    test('200 returns a token for an existing member when room is in progress', async () => {
+        const { createRoomFixture } = require('../helpers/fixtures');
+        const room = createRoomFixture(db, user1.id, { inviteCode: 'CLAIM2', status: 'in_progress', maxPlayers: 4 });
+
+        const res = await request(app)
+            .post('/api/rooms/by-code/claim2/claim-member')
+            .send({ member_id: room.room_members[0].id });
+
+        expect(res.status).toBe(200);
+        expect(res.body.user.id).toBe(user1.id);
+        expect(res.body.room.status).toBe('in_progress');
+    });
+
+    test('400 rejects member claims while room is still open for new players', async () => {
+        const { createRoomFixture } = require('../helpers/fixtures');
+        const room = createRoomFixture(db, user1.id, { inviteCode: 'OPEN01', maxPlayers: 4 });
+
+        const res = await request(app)
+            .post('/api/rooms/by-code/OPEN01/claim-member')
+            .send({ member_id: room.room_members[0].id });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/still open/);
+    });
+
+    test('404 rejects member id from another room', async () => {
+        const { createRoomFixture } = require('../helpers/fixtures');
+        createRoomFixture(db, user1.id, { inviteCode: 'CLAIM3', maxPlayers: 1 });
+
+        const res = await request(app)
+            .post('/api/rooms/by-code/CLAIM3/claim-member')
+            .send({ member_id: 'not-in-room' });
+
+        expect(res.status).toBe(404);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/rooms/mine
 // ---------------------------------------------------------------------------
 describe('GET /api/rooms/mine', () => {
