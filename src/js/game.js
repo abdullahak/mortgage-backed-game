@@ -458,6 +458,7 @@ function renderPlayerCard(player, isCurrentUser) {
                 ${player.corporations.map(c => `
                     <div class="corp-badge">
                         ${escapeHtml(c.ticker)} (${c.sharesOwned}/${c.totalShares} shares, ${ownershipPercent(c.sharesOwned, c.totalShares)}%)
+                        <span class="corp-assets-owned">NAV: $${getPlayerCorporationShareValue(c).toFixed(2)}/share</span>
                         ${c.insolvent ? '<span class="badge badge-danger">Insolvent</span>' : ''}
                         ${renderCorporationAssetSummary(c.id)}
                     </div>
@@ -519,8 +520,44 @@ function interestPayment(debt) {
 
 function getPlayerCorporationValue(player) {
     return (player.corporations || []).reduce((sum, corp) => {
-        return sum + Number(corp.sharesOwned || 0) * Number(corp.pricePerShare || 0);
+        return sum + Number(corp.sharesOwned || 0) * getPlayerCorporationShareValue(corp);
     }, 0);
+}
+
+function getPlayerCorporationShareValue(playerCorp) {
+    if (Number.isFinite(Number(playerCorp.shareValue))) return Number(playerCorp.shareValue);
+    const corp = currentGame?.game_state?.corporations?.find(item => item.id === playerCorp.id);
+    return corp ? getCorporationShareValue(corp) : Number(playerCorp.pricePerShare || 0);
+}
+
+function getCorporationAssetValue(corp) {
+    const properties = currentGame?.game_state?.properties || [];
+    const assetIds = new Set((corp.assets || []).map(asset => asset.id));
+    const propertyValue = properties
+        .filter(prop => prop.ownerId === corp.id)
+        .reduce((sum, prop) => {
+            assetIds.delete(prop.id);
+            return sum + Number(prop.price || 0) + Number(prop.houses || 0) * (HOUSE_COSTS[prop.color] || 0);
+        }, 0);
+    const fallbackAssetValue = (corp.assets || [])
+        .filter(asset => assetIds.has(asset.id))
+        .reduce((sum, asset) => sum + Number(asset.value || 0), 0);
+    return propertyValue + fallbackAssetValue;
+}
+
+function getCorporationDebtValue(corp) {
+    return (corp.debts || []).reduce((sum, debt) => sum + Number(debt.principal || 0), 0);
+}
+
+function getCorporationNetAssetValue(corp) {
+    if (corp.insolvent || corp.status === 'insolvent') return 0;
+    return getCorporationAssetValue(corp) + Number(corp.cash || 0) - getCorporationDebtValue(corp);
+}
+
+function getCorporationShareValue(corp) {
+    const totalShares = Number(corp.totalShares || 0);
+    if (totalShares <= 0) return 0;
+    return Math.max(0, getCorporationNetAssetValue(corp)) / totalShares;
 }
 
 function getEntityCashFlow(entityId) {
@@ -542,7 +579,7 @@ function renderCorporationAssetSummary(corpId) {
     const corp = currentGame?.game_state?.corporations?.find(item => item.id === corpId);
     if (!corp || !Array.isArray(corp.assets) || corp.assets.length === 0) return '';
     const assets = corp.assets
-        .map(asset => `${escapeHtml(asset.name)} (${ownershipPercent(getMyShares(corp), corp.totalShares)}%)`)
+        .map(asset => escapeHtml(asset.name))
         .join(', ');
     return `<span class="corp-assets-owned">Assets: ${assets}</span>`;
 }
@@ -550,6 +587,23 @@ function renderCorporationAssetSummary(corpId) {
 function getMyShares(corp) {
     const holder = (corp.shareholders || []).find(item => item.userId === currentUser.id);
     return holder ? Number(holder.shares || 0) : 0;
+}
+
+function getListedShares(corp) {
+    return Math.max(0, Number(corp.availableShares || 0));
+}
+
+function getTreasuryListedShares(corp) {
+    return Math.min(Math.max(0, Number(corp.treasuryShares || 0)), getListedShares(corp));
+}
+
+function getFounderListedShares(corp) {
+    return Math.max(0, getListedShares(corp) - getTreasuryListedShares(corp));
+}
+
+function getBuyableListedShares(corp, userId) {
+    if (corp.founderId === userId) return getTreasuryListedShares(corp);
+    return getListedShares(corp);
 }
 
 function togglePlayerCard(summaryEl) {
@@ -627,9 +681,16 @@ function formatLogEvent(type, data) {
         case 'property_purchase':
             return `${data.buyer} purchased ${data.property} for $${Number(data.price).toFixed(2)}`;
         case 'ipo_created':
-            return `${data.founder} created IPO ${data.ticker} — ${data.shares} shares at $${Number(data.pricePerShare).toFixed(2)}/share`;
-        case 'share_purchase':
-            return `${data.buyer} bought ${data.shares} share(s) of ${data.ticker} for $${Number(data.totalCost).toFixed(2)}`;
+            return `${data.founder} created IPO ${data.ticker} — ${data.founderShares || data.shares} founder-owned shares listed at $${Number(data.pricePerShare).toFixed(2)}/share`;
+        case 'share_purchase': {
+            const founderShares = Number(data.founderShares || 0);
+            const treasuryShares = Number(data.treasuryShares || 0);
+            const parts = [];
+            if (founderShares > 0) parts.push(`${founderShares} from founder`);
+            if (treasuryShares > 0) parts.push(`${treasuryShares} from treasury`);
+            const source = parts.length ? ` (${parts.join(', ')})` : '';
+            return `${data.buyer} bought ${data.shares} share(s) of ${data.ticker}${source} for $${Number(data.totalCost).toFixed(2)}`;
+        }
         case 'chairman_changed':
             if (data.method === 'bankruptcy') return `${data.ticker} chairman changed to ${data.chairman} after bankruptcy`;
             return `${data.ticker} chairman changed to ${data.chairman} by ${data.method === 'vote' ? `${data.supportedShares} supporting shares` : 'majority control'}`;
@@ -1062,20 +1123,27 @@ async function openCorporationModal() {
         const assets = Array.isArray(corp.assets) ? corp.assets : [];
         const debts = Array.isArray(corp.debts) ? corp.debts : [];
         const myShares = shareholders.find(s => s.userId === currentUser.id);
-        const sharesAvailable = typeof corp.availableShares === 'number'
-            ? corp.availableShares
-            : corp.totalShares - shareholders.reduce((sum, s) => sum + s.shares, 0);
+        const listedShares = getListedShares(corp);
+        const treasuryListedShares = getTreasuryListedShares(corp);
+        const founderListedShares = getFounderListedShares(corp);
         const isFounder = corp.founderId === currentUser.id;
         const isInsolvent = !!corp.insolvent || corp.status === 'insolvent';
-        const canBuy = isMyTurn && !isFounder && sharesAvailable > 0 && !isInsolvent;
+        const buyableShares = getBuyableListedShares(corp, currentUser.id);
+        const canBuy = isMyTurn && buyableShares > 0 && !isInsolvent;
         const governanceHtml = renderChairmanGovernance(corp);
         const pricePerShare = Number(corp.pricePerShare || 0);
+        const netAssetValue = getCorporationNetAssetValue(corp);
+        const shareValue = getCorporationShareValue(corp);
         const shareholderRows = shareholders.length
             ? shareholders.map(s => `<li>${escapeHtml(s.name)}: ${s.shares} shares (${ownershipPercent(s.shares, corp.totalShares)}%)</li>`).join('')
-            : '<li>No public shares sold yet</li>';
+            : '<li>No active shareholders</li>';
         const debtRows = debts.length
             ? debts.map(d => `<li>$${Number(d.principal || 0).toFixed(2)} @ ${Number(d.interestRate || 0)}% (interest next turn: $${interestPayment(d).toFixed(2)})</li>`).join('')
             : '<li>No corporation debt</li>';
+        const listingDetails = listedShares > 0
+            ? `<p>Listed Shares: ${listedShares} (${founderListedShares} founder, ${treasuryListedShares} treasury)</p>`
+            : '<p>Listed Shares: 0</p>';
+        const buyLabel = isFounder ? 'Buy treasury shares' : 'Buy listed shares';
 
         return `
         <div class="corporation-card">
@@ -1084,7 +1152,9 @@ async function openCorporationModal() {
             <p>Chairman: ${escapeHtml(isInsolvent ? 'Closed' : (corp.chairmanName || corp.founderName || 'Unassigned'))}</p>
             <p>Majority holder: ${escapeHtml(majorityHolderName(corp) || 'None')}</p>
             <p>Treasury Cash: $${Number(corp.cash || 0).toFixed(2)}</p>
-            <p>Total Shares: ${corp.totalShares} | Available: ${sharesAvailable} | Price: $${pricePerShare.toFixed(2)}/share</p>
+            <p>Total Shares: ${corp.totalShares} | Asking: $${pricePerShare.toFixed(2)}/share | NAV: $${shareValue.toFixed(2)}/share</p>
+            <p>Net Asset Value: $${netAssetValue.toFixed(2)}</p>
+            ${listingDetails}
             ${isInsolvent ? '<p class="corp-status-warning">This corporation is closed after treasury insolvency. Properties returned to the Bank; shares, debt, and governance were wiped.</p>' : ''}
             <h4>Assets:</h4>
             <ul>
@@ -1102,8 +1172,8 @@ async function openCorporationModal() {
             ${myShares ? `<p><strong>Your shares:</strong> ${myShares.shares}</p>` : ''}
             ${canBuy ? `
                 <div class="buy-shares-form" style="margin-top: 10px; padding: 10px; background: #f0f4ff; border-radius: 6px;">
-                    <label>Buy shares (max ${sharesAvailable}):</label>
-                    <input type="number" id="buyShares-${corp.id}" min="1" max="${sharesAvailable}" value="1" style="width: 80px; margin: 0 8px;">
+                    <label>${buyLabel} (max ${buyableShares}):</label>
+                    <input type="number" id="buyShares-${corp.id}" min="1" max="${buyableShares}" value="1" style="width: 80px; margin: 0 8px;">
                     <button class="btn btn-primary" style="padding: 4px 12px; font-size: 0.9rem;" onclick="buyShares('${corp.id}')">Buy</button>
                 </div>
             ` : ''}
@@ -1247,12 +1317,10 @@ async function buyShares(corpId) {
 
     const numShares = parseInt(document.getElementById(`buyShares-${corpId}`).value);
     const totalCost = numShares * Number(corp.pricePerShare || 0);
-    const sharesAvailable = typeof corp.availableShares === 'number'
-        ? corp.availableShares
-        : corp.totalShares - (corp.shareholders || []).reduce((sum, s) => sum + s.shares, 0);
+    const buyableShares = getBuyableListedShares(corp, currentUser.id);
 
-    if (!numShares || numShares < 1 || numShares > sharesAvailable) {
-        alert(`Enter a valid number of shares (1–${sharesAvailable})`);
+    if (!numShares || numShares < 1 || numShares > buyableShares) {
+        alert(`Enter a valid number of shares (1-${buyableShares})`);
         return;
     }
 
@@ -1267,7 +1335,7 @@ async function buyShares(corpId) {
 
     } catch (error) {
         console.error('Error buying shares:', error);
-        alert('Failed to buy shares');
+        alert(error.message || 'Failed to buy shares');
     }
 }
 

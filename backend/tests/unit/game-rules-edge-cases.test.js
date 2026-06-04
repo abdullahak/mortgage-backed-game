@@ -3,6 +3,7 @@
 const {
     MONOPOLY_PROPERTIES,
     applyAction,
+    calculateNetWorth,
     normalizeState,
 } = require('../../domain/gameRules');
 
@@ -86,6 +87,110 @@ function makePlayer(userId, name, overrides = {}) {
 }
 
 describe('game rule edge cases', () => {
+    test('IPO gives founder all shares and buyer purchases founder-listed shares', () => {
+        const state = makeState();
+        ownProperty(state, 'prop-0', 'alice', 'Alice');
+
+        const created = applyAction(state, 'alice', {
+            type: 'create_ipo',
+            payload: { ticker: 'BRWN', totalShares: 12, pricePerShare: 50, assetIds: ['prop-0'] },
+        });
+        const corporation = created.state.corporations.find(corp => corp.ticker === 'BRWN');
+        const aliceAfterIpo = created.state.players.find(player => player.userId === 'alice');
+
+        expect(corporation.shareholders).toEqual([{ userId: 'alice', name: 'Alice', shares: 12 }]);
+        expect(corporation.availableShares).toBe(12);
+        expect(corporation.treasuryShares).toBe(0);
+        expect(aliceAfterIpo.corporations[0].sharesOwned).toBe(12);
+        expect(aliceAfterIpo.corporations[0].shareValue).toBe(5);
+
+        created.state.currentPlayerIndex = 1;
+        const bought = applyAction(created.state, 'bob', {
+            type: 'buy_shares',
+            payload: { corpId: corporation.id, shares: 3 },
+        });
+        const updatedCorp = bought.state.corporations.find(corp => corp.id === corporation.id);
+        const alice = bought.state.players.find(player => player.userId === 'alice');
+        const bob = bought.state.players.find(player => player.userId === 'bob');
+        const purchaseEvent = bought.events.find(event => event.type === 'share_purchase');
+
+        expect(alice.cash).toBe(1650);
+        expect(bob.cash).toBe(1350);
+        expect(updatedCorp.cash).toBe(0);
+        expect(updatedCorp.availableShares).toBe(9);
+        expect(updatedCorp.treasuryShares).toBe(0);
+        expect(updatedCorp.shareholders.find(holder => holder.userId === 'alice').shares).toBe(9);
+        expect(updatedCorp.shareholders.find(holder => holder.userId === 'bob').shares).toBe(3);
+        expect(calculateNetWorth(bought.state, 'bob')).toBe(1365);
+        expect(purchaseEvent.data.founderProceeds).toBe(150);
+        expect(purchaseEvent.data.treasuryProceeds).toBe(0);
+    });
+
+    test('legacy 0-founder-share corporations are repaired to founder equity', () => {
+        const state = makeState({
+            corporations: [{
+                id: 'corp-1',
+                ticker: 'OLD',
+                name: 'OLD Corporation',
+                founderId: 'alice',
+                founderName: 'Alice',
+                chairmanId: 'alice',
+                chairmanName: 'Alice',
+                totalShares: 12,
+                pricePerShare: 50,
+                availableShares: 9,
+                assets: [],
+                shareholders: [{ userId: 'bob', name: 'Bob', shares: 3 }],
+                debts: [],
+                cash: 0,
+            }],
+        });
+        const corporation = state.corporations[0];
+
+        expect(corporation.shareholders.find(holder => holder.userId === 'alice').shares).toBe(9);
+        expect(corporation.shareholders.find(holder => holder.userId === 'bob').shares).toBe(3);
+        expect(corporation.availableShares).toBe(9);
+        expect(corporation.treasuryShares).toBe(0);
+    });
+
+    test('treasury shares can be purchased by the founder and pay the corporation treasury', () => {
+        const state = makeState({
+            corporations: [{
+                id: 'corp-1',
+                ticker: 'TRSY',
+                name: 'TRSY Corporation',
+                founderId: 'alice',
+                founderName: 'Alice',
+                chairmanId: 'alice',
+                chairmanName: 'Alice',
+                totalShares: 12,
+                pricePerShare: 50,
+                availableShares: 3,
+                treasuryShares: 3,
+                assets: [],
+                shareholders: [{ userId: 'alice', name: 'Alice', shares: 9 }],
+                debts: [],
+                cash: 0,
+            }],
+        });
+
+        const result = applyAction(state, 'alice', {
+            type: 'buy_shares',
+            payload: { corpId: 'corp-1', shares: 2 },
+        });
+        const corporation = result.state.corporations[0];
+        const alice = result.state.players.find(player => player.userId === 'alice');
+        const event = result.events.find(item => item.type === 'share_purchase');
+
+        expect(alice.cash).toBe(1400);
+        expect(corporation.cash).toBe(100);
+        expect(corporation.treasuryShares).toBe(1);
+        expect(corporation.availableShares).toBe(1);
+        expect(corporation.shareholders.find(holder => holder.userId === 'alice').shares).toBe(11);
+        expect(event.data.founderProceeds).toBe(0);
+        expect(event.data.treasuryProceeds).toBe(100);
+    });
+
     test('corporation-owned properties collect rent into corporation treasury', () => {
         const state = makeState({
             players: [
@@ -268,6 +373,7 @@ describe('game rule edge cases', () => {
                 totalShares: 8,
                 pricePerShare: 50,
                 availableShares: 5,
+                treasuryShares: 5,
                 assets: [],
                 shareholders: [
                     { userId: 'alice', name: 'Alice', shares: 2 },
@@ -371,6 +477,7 @@ describe('game rule edge cases', () => {
                 totalShares: 8,
                 pricePerShare: 50,
                 availableShares: 1,
+                treasuryShares: 1,
                 assets: [],
                 shareholders: [
                     { userId: 'alice', name: 'Alice', shares: 3 },
@@ -662,6 +769,7 @@ describe('game rule edge cases', () => {
                 totalShares: 8,
                 pricePerShare: 50,
                 availableShares: 5,
+                treasuryShares: 5,
                 assets: [{ id: 'prop-0', name: 'Mediterranean Ave', value: 60, color: 'Brown' }],
                 shareholders: [
                     { userId: 'bob', name: 'Bob', shares: 2 },
@@ -696,6 +804,7 @@ describe('game rule edge cases', () => {
         expect(corporation.debts).toEqual([]);
         expect(corporation.shareholders).toEqual([]);
         expect(corporation.availableShares).toBe(0);
+        expect(corporation.treasuryShares).toBe(0);
         expect(corporation.pricePerShare).toBe(0);
         expect(corporation.chairmanId).toBeNull();
         expect(corporation.chairmanName).toBeNull();

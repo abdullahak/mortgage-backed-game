@@ -168,9 +168,12 @@ function normalizeState(raw) {
         corp.debts = Array.isArray(corp.debts) ? corp.debts : [];
         corp.chairmanVotes = Array.isArray(corp.chairmanVotes) ? corp.chairmanVotes : [];
         corp.cash = Number(corp.cash || 0);
+        corp.totalShares = Math.max(0, Math.floor(Number(corp.totalShares || 0)));
+        corp.pricePerShare = Number(corp.pricePerShare || 0);
+        corp.treasuryShares = Math.max(0, Math.floor(Number(corp.treasuryShares || 0)));
         corp.insolvent = !!corp.insolvent || corp.status === 'insolvent';
         corp.status = corp.insolvent ? 'insolvent' : (corp.status || 'active');
-        corp.availableShares = Number(corp.availableShares ?? corp.totalShares ?? 0);
+        corp.availableShares = Math.max(0, Math.floor(Number(corp.availableShares ?? corp.totalShares ?? 0)));
         if (corp.insolvent) {
             corp.chairmanId = corp.chairmanId || null;
             corp.chairmanName = corp.chairmanName || null;
@@ -178,6 +181,7 @@ function normalizeState(raw) {
             corp.chairmanId = corp.chairmanId || corp.founderId || null;
             corp.chairmanName = corp.chairmanName || corp.founderName || null;
         }
+        normalizeCorporationShareLedger(state, corp);
     });
     state.gameLog = Array.isArray(state.gameLog) ? state.gameLog.slice(-100) : [];
     state.settings = {
@@ -850,8 +854,9 @@ function createIPO(state, player, payload, events) {
         totalShares,
         pricePerShare,
         assets,
-        shareholders: [],
+        shareholders: [{ userId: player.userId, name: player.name, shares: totalShares }],
         availableShares: totalShares,
+        treasuryShares: 0,
         cash: 0,
         debts: [],
         chairmanVotes: [],
@@ -862,31 +867,75 @@ function createIPO(state, player, payload, events) {
         prop.ownerId = corporation.id;
         prop.ownerName = `[${ticker}]`;
     });
-    events.push(makeEvent(player, 'ipo_created', { founder: player.name, ticker, shares: totalShares, pricePerShare }));
-    log(state, `${player.name} created ${ticker} IPO with ${totalShares} shares at $${pricePerShare} each`);
+    events.push(makeEvent(player, 'ipo_created', {
+        founder: player.name,
+        ticker,
+        shares: totalShares,
+        founderShares: totalShares,
+        listedShares: totalShares,
+        pricePerShare,
+    }));
+    log(state, `${player.name} created ${ticker} IPO with ${totalShares} founder-owned shares listed at $${pricePerShare} each`);
 }
 
 function buyShares(state, player, payload, events) {
     const corp = state.corporations.find(c => c.id === payload.corpId);
     if (!corp) throw new GameRuleError(404, 'Corporation not found');
     if (corp.insolvent) throw new GameRuleError(400, 'Corporation is insolvent');
-    if (corp.founderId === player.userId) throw new GameRuleError(400, 'Founder cannot buy own shares');
     const shares = positiveInt(payload.shares, 'shares');
-    if (shares > corp.availableShares) throw new GameRuleError(400, 'Not enough shares available');
+    const salePool = getShareSalePool(state, corp);
+    const maxShares = player.userId === corp.founderId ? salePool.treasuryListedShares : salePool.totalListedShares;
+    if (shares > maxShares) {
+        if (player.userId === corp.founderId && salePool.founderListedShares > 0) {
+            throw new GameRuleError(400, 'Founder cannot buy own listed shares');
+        }
+        throw new GameRuleError(400, 'Not enough shares available');
+    }
     const totalCost = shares * corp.pricePerShare;
     if (player.cash < totalCost) throw new GameRuleError(400, 'Insufficient funds');
+
+    let remaining = shares;
+    const treasuryShares = Math.min(remaining, salePool.treasuryListedShares);
+    const founderShares = remaining - treasuryShares;
+
     player.cash -= totalCost;
-    corp.cash = Number(corp.cash || 0) + totalCost;
-    recordCashFlow(state, player.userId, corp.id, totalCost);
-    let holder = corp.shareholders.find(s => s.userId === player.userId);
-    if (!holder) {
-        holder = { userId: player.userId, name: player.name, shares: 0 };
-        corp.shareholders.push(holder);
+    if (treasuryShares > 0) {
+        const treasuryCost = treasuryShares * corp.pricePerShare;
+        corp.cash = Number(corp.cash || 0) + treasuryCost;
+        corp.treasuryShares = Math.max(0, Number(corp.treasuryShares || 0) - treasuryShares);
+        recordCashFlow(state, player.userId, corp.id, treasuryCost);
+        remaining -= treasuryShares;
     }
-    holder.shares += shares;
-    corp.availableShares -= shares;
-    events.push(makeEvent(player, 'share_purchase', { buyer: player.name, ticker: corp.ticker, shares, totalCost }));
-    log(state, `${player.name} bought ${shares} share(s) of ${corp.ticker} for $${totalCost.toFixed(2)}`);
+    if (founderShares > 0) {
+        if (!salePool.founder || !salePool.founderHolding || salePool.founder.bankrupt) {
+            throw new GameRuleError(400, 'Founder listed shares are not available');
+        }
+        const founderCost = founderShares * corp.pricePerShare;
+        salePool.founder.cash += founderCost;
+        salePool.founderHolding.shares = Number(salePool.founderHolding.shares || 0) - founderShares;
+        recordCashFlow(state, player.userId, salePool.founder.userId, founderCost);
+    }
+
+    addShareholderShares(corp, player, shares);
+    removeZeroShareholders(corp);
+    corp.availableShares = Math.max(0, Number(corp.availableShares || 0) - shares);
+    normalizeCorporationShareLedger(state, corp);
+
+    events.push(makeEvent(player, 'share_purchase', {
+        buyer: player.name,
+        ticker: corp.ticker,
+        shares,
+        totalCost,
+        founderShares,
+        treasuryShares,
+        founderProceeds: founderShares * corp.pricePerShare,
+        treasuryProceeds: treasuryShares * corp.pricePerShare,
+        seller: founderShares > 0 ? salePool.founder.name : '[Treasury]',
+    }));
+    const proceedsParts = [];
+    if (founderShares > 0) proceedsParts.push(`$${(founderShares * corp.pricePerShare).toFixed(2)} to ${salePool.founder.name}`);
+    if (treasuryShares > 0) proceedsParts.push(`$${(treasuryShares * corp.pricePerShare).toFixed(2)} to ${corp.ticker} treasury`);
+    log(state, `${player.name} bought ${shares} share(s) of ${corp.ticker} for $${totalCost.toFixed(2)} (${proceedsParts.join(', ')})`);
 }
 
 function issueDebt(state, player, payload, events) {
@@ -1041,6 +1090,111 @@ function hasMajorityShares(corp, userId) {
 function sharesFor(corp, userId) {
     const holder = (corp.shareholders || []).find(shareholder => shareholder.userId === userId);
     return Number(holder?.shares || 0);
+}
+
+function addShareholderShares(corp, player, shares) {
+    if (!player || !player.userId || shares <= 0) return null;
+    corp.shareholders = Array.isArray(corp.shareholders) ? corp.shareholders : [];
+    let holder = corp.shareholders.find(shareholder => shareholder.userId === player.userId);
+    if (!holder) {
+        holder = { userId: player.userId, name: player.name, shares: 0 };
+        corp.shareholders.push(holder);
+    }
+    holder.name = holder.name || player.name;
+    holder.shares = Number(holder.shares || 0) + shares;
+    return holder;
+}
+
+function removeZeroShareholders(corp) {
+    corp.shareholders = (corp.shareholders || []).filter(shareholder => Number(shareholder.shares || 0) > 0);
+}
+
+function normalizeCorporationShareLedger(state, corp) {
+    corp.totalShares = Math.max(0, Math.floor(Number(corp.totalShares || 0)));
+    corp.treasuryShares = Math.max(0, Math.floor(Number(corp.treasuryShares || 0)));
+    corp.availableShares = Math.max(0, Math.floor(Number(corp.availableShares || 0)));
+    corp.shareholders = aggregateShareholders(state, corp.shareholders || []);
+
+    if (corp.insolvent) {
+        corp.treasuryShares = 0;
+        corp.availableShares = 0;
+        return;
+    }
+
+    const heldShares = shareholderShareTotal(corp);
+    const missingShares = Math.max(0, corp.totalShares - heldShares - corp.treasuryShares);
+    if (missingShares > 0) {
+        const founder = state.players.find(player => player.userId === corp.founderId && !player.bankrupt);
+        if (founder) {
+            addShareholderShares(corp, founder, missingShares);
+        } else {
+            corp.treasuryShares += missingShares;
+        }
+    }
+
+    const excessTreasuryShares = Math.max(0, shareholderShareTotal(corp) + corp.treasuryShares - corp.totalShares);
+    if (excessTreasuryShares > 0) {
+        corp.treasuryShares = Math.max(0, corp.treasuryShares - excessTreasuryShares);
+    }
+    corp.availableShares = Math.min(corp.availableShares, getSaleableShares(corp));
+}
+
+function aggregateShareholders(state, shareholders) {
+    const playersById = new Map((state.players || []).map(player => [player.userId, player]));
+    const holdersById = new Map();
+    shareholders.forEach(shareholder => {
+        const userId = shareholder?.userId;
+        const shares = Math.max(0, Math.floor(Number(shareholder?.shares || 0)));
+        if (!userId || shares <= 0) return;
+        const player = playersById.get(userId);
+        const existing = holdersById.get(userId);
+        if (existing) {
+            existing.shares += shares;
+        } else {
+            holdersById.set(userId, {
+                userId,
+                name: shareholder.name || player?.name || 'Shareholder',
+                shares,
+            });
+        }
+    });
+    return Array.from(holdersById.values());
+}
+
+function shareholderShareTotal(corp) {
+    return (corp.shareholders || []).reduce((sum, shareholder) => sum + Number(shareholder.shares || 0), 0);
+}
+
+function getSaleableShares(corp) {
+    return sharesFor(corp, corp.founderId) + Number(corp.treasuryShares || 0);
+}
+
+function getShareSalePool(state, corp) {
+    const founder = state.players.find(player => player.userId === corp.founderId);
+    const founderHolding = (corp.shareholders || []).find(shareholder => shareholder.userId === corp.founderId);
+    const listedShares = Math.max(0, Math.floor(Number(corp.availableShares || 0)));
+    const treasuryShares = Math.max(0, Math.floor(Number(corp.treasuryShares || 0)));
+    const treasuryListedShares = Math.min(treasuryShares, listedShares);
+    const founderListedShares = Math.min(
+        Math.max(listedShares - treasuryListedShares, 0),
+        Math.max(0, Number(founderHolding?.shares || 0))
+    );
+    return {
+        founder,
+        founderHolding,
+        treasuryListedShares,
+        founderListedShares,
+        totalListedShares: treasuryListedShares + founderListedShares,
+    };
+}
+
+function returnSharesToTreasury(corp, shares) {
+    if (shares <= 0) return;
+    const heldShares = shareholderShareTotal(corp);
+    const maxTreasuryShares = Math.max(0, Number(corp.totalShares || 0) - heldShares);
+    const returnedShares = Math.min(shares, maxTreasuryShares);
+    corp.treasuryShares = Math.min(maxTreasuryShares, Number(corp.treasuryShares || 0) + returnedShares);
+    corp.availableShares = Math.min(getSaleableShares(corp), Number(corp.availableShares || 0) + returnedShares);
 }
 
 function voteSupportShares(corp, vote) {
@@ -1307,24 +1461,20 @@ function liquidateBankruptPlayer(state, player, events, claim = null) {
     const returnedSharePositions = [];
     const transferredSharePositions = [];
     state.corporations.forEach(corp => {
-        const beforeShares = Number(corp.availableShares || 0);
         const holding = (corp.shareholders || []).find(shareholder => shareholder.userId === player.userId);
         if (holding) {
             const shares = Number(holding.shares || 0);
             corp.shareholders = (corp.shareholders || []).filter(shareholder => shareholder.userId !== player.userId);
             if (creditor?.type === 'player') {
-                const recipientHolding = corp.shareholders.find(shareholder => shareholder.userId === creditor.id);
-                if (recipientHolding) {
-                    recipientHolding.shares = Number(recipientHolding.shares || 0) + shares;
-                } else {
-                    corp.shareholders.push({ userId: creditor.id, name: creditor.name, shares });
-                }
+                addShareholderShares(corp, { userId: creditor.id, name: creditor.name }, shares);
                 transferredSharePositions.push({ ticker: corp.ticker, shares, to: creditor.name });
             } else {
-                corp.availableShares = Math.min(Number(corp.totalShares || 0), beforeShares + shares);
+                returnSharesToTreasury(corp, shares);
                 returnedSharePositions.push({ ticker: corp.ticker, shares });
             }
         }
+        removeZeroShareholders(corp);
+        normalizeCorporationShareLedger(state, corp);
         corp.chairmanVotes = (corp.chairmanVotes || []).map(vote => {
             if (vote.status !== 'open') return vote;
             const supporters = (vote.supporters || []).filter(supporter => supporter.userId !== player.userId);
@@ -1531,6 +1681,7 @@ function resolveCorporationInsolvency(state, corp, actor, events, details = {}) 
     corp.debts = [];
     corp.shareholders = [];
     corp.availableShares = 0;
+    corp.treasuryShares = 0;
     corp.pricePerShare = 0;
     corp.chairmanId = null;
     corp.chairmanName = null;
@@ -1653,10 +1804,39 @@ function calculateNetWorth(state, playerId) {
         .reduce((sum, prop) => sum + prop.price + (prop.houses || 0) * (HOUSE_COSTS[prop.color] || 0), 0);
     const corpValue = state.corporations.reduce((sum, corp) => {
         const holding = (corp.shareholders || []).find(s => s.userId === player.userId);
-        return sum + ((holding ? holding.shares : 0) * (corp.pricePerShare || 0));
+        return sum + ((holding ? holding.shares : 0) * calculateCorporationShareValue(state, corp));
     }, 0);
     const debtTotal = player.debts.reduce((sum, debt) => sum + Number(debt.principal || 0), 0);
     return player.cash + propertyValue + corpValue - debtTotal;
+}
+
+function calculateCorporationAssetValue(state, corp) {
+    const assetIds = new Set((corp.assets || []).map(asset => asset.id));
+    const propertyValue = state.properties
+        .filter(prop => prop.ownerId === corp.id)
+        .reduce((sum, prop) => {
+            assetIds.delete(prop.id);
+            return sum + prop.price + (prop.houses || 0) * (HOUSE_COSTS[prop.color] || 0);
+        }, 0);
+    const fallbackAssetValue = (corp.assets || [])
+        .filter(asset => assetIds.has(asset.id))
+        .reduce((sum, asset) => sum + Number(asset.value || 0), 0);
+    return propertyValue + fallbackAssetValue;
+}
+
+function calculateCorporationDebtValue(corp) {
+    return (corp.debts || []).reduce((sum, debt) => sum + Number(debt.principal || 0), 0);
+}
+
+function calculateCorporationNetAssetValue(state, corp) {
+    if (corp.insolvent) return 0;
+    return calculateCorporationAssetValue(state, corp) + Number(corp.cash || 0) - calculateCorporationDebtValue(corp);
+}
+
+function calculateCorporationShareValue(state, corp) {
+    const totalShares = Number(corp.totalShares || 0);
+    if (totalShares <= 0) return 0;
+    return Math.max(0, calculateCorporationNetAssetValue(state, corp)) / totalShares;
 }
 
 function ensureCashFlow(state, entityId) {
@@ -1842,8 +2022,12 @@ function validateStateInvariants(state) {
     }
     for (const corp of state.corporations) {
         const shares = (corp.shareholders || []).reduce((sum, s) => sum + Number(s.shares || 0), 0);
-        if (shares > corp.totalShares) return 'Corporation shareholders exceed total shares';
+        const treasuryShares = Number(corp.treasuryShares || 0);
+        if (shares + treasuryShares > corp.totalShares) return 'Corporation shareholders exceed total shares';
+        if (!corp.insolvent && shares + treasuryShares !== Number(corp.totalShares || 0)) return 'Corporation share ledger does not match total shares';
         if (corp.availableShares < 0 || corp.availableShares > corp.totalShares) return 'Invalid available shares';
+        if (treasuryShares < 0 || treasuryShares > corp.totalShares) return 'Invalid treasury shares';
+        if (corp.availableShares > getSaleableShares(corp)) return 'Listed shares exceed saleable shares';
     }
     if (state.auction?.status === 'open') {
         const prop = state.properties.find(item => item.id === state.auction.propertyId);
@@ -1869,12 +2053,18 @@ function syncDerivedPortfolios(state) {
                 const holder = (corp.shareholders || []).find(s => s.userId === player.userId);
                 const isChairman = corp.chairmanId === player.userId;
                 const isFounder = corp.founderId === player.userId;
+                const netAssetValue = calculateCorporationNetAssetValue(state, corp);
+                const shareValue = calculateCorporationShareValue(state, corp);
                 return holder || isChairman || isFounder ? {
                     id: corp.id,
                     ticker: corp.ticker,
                     sharesOwned: holder ? holder.shares : 0,
                     totalShares: corp.totalShares,
                     pricePerShare: corp.pricePerShare,
+                    shareValue,
+                    netAssetValue,
+                    availableShares: Number(corp.availableShares || 0),
+                    treasuryShares: Number(corp.treasuryShares || 0),
                     status: corp.status || 'active',
                     insolvent: !!corp.insolvent,
                     role: isChairman ? 'Chairman' : (isFounder ? 'Founder' : 'Shareholder'),

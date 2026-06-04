@@ -66,7 +66,7 @@ Tap **Buy Property** after landing on an unowned property. Cash is deducted imme
 
 Requires owning at least one property.
 
-Tap **Create IPO** and select which properties to bundle into a corporation. Set a **ticker symbol**, **number of shares** (1–12), and **price per share**. The selected properties move out of your personal holdings into the corporation, and other players can buy available shares on their turns.
+Tap **Create IPO** and select which properties to bundle into a corporation. Set a **ticker symbol**, **number of shares** (1–12), and **listing price per share**. The selected properties move out of your personal holdings into the corporation, you receive all founder shares, and those founder-held shares are listed for other players to buy on their turns.
 
 ---
 
@@ -92,7 +92,9 @@ Tap **Manage Debt → Settle Existing Debt**. Select the debt and enter a paymen
 
 ### Buy Shares
 
-Tap **Corporations** during your turn. Any corporation with available shares shows a **Buy** button (not visible to the founder). Enter the number of shares; cost is `shares × pricePerShare`. Cash transfers into the corporation treasury immediately.
+Tap **Corporations** during your turn. Any corporation with listed shares shows a **Buy** button. Enter the number of shares; cost is `shares × listingPrice`. Normal IPO purchases transfer cash to the founder and move those shares from the founder to the buyer. If bankruptcy returned shares to the corporation treasury, those treasury shares can also be bought; that cash goes into the corporation treasury.
+
+Player net worth values corporation stakes by net asset value, not listing price: corporation-owned property value plus treasury cash minus corporation debt, divided by total shares. Share value is floored at $0 if the corporation's net asset value is negative.
 
 If corporate debt interest pushes a corporation below $0 treasury cash, the corporation becomes insolvent. Its properties return to the bank, houses/hotels are cleared, corporation debts and shareholder positions are wiped, the chairman seat closes, and no further shares/debt/governance actions are available for that corporation.
 
@@ -148,7 +150,7 @@ Highest net worth wins.
 
 ## Bankruptcy
 
-Falling below $0 cash or ending the turn with unpaid rent triggers final bankruptcy. Bankrupt players can no longer act, their turns are skipped, and pending trade offers involving them are canceled. If bankruptcy is caused by unpaid rent to a player, directly owned properties and player-held corporation shares transfer to that creditor with houses/hotels cleared. If rent is owed to a corporation, directly owned properties transfer to that corporation while player-held shares return to their corporations. Bank, tax, card, and interest bankruptcies return direct properties to the bank and return player-held shares to the available share pool. Corporation-owned properties remain with the corporation unless the corporation itself becomes insolvent.
+Falling below $0 cash or ending the turn with unpaid rent triggers final bankruptcy. Bankrupt players can no longer act, their turns are skipped, and pending trade offers involving them are canceled. If bankruptcy is caused by unpaid rent to a player, directly owned properties and player-held corporation shares transfer to that creditor with houses/hotels cleared. If rent is owed to a corporation, directly owned properties transfer to that corporation while player-held shares return to the issuing corporation's treasury share pool. Bank, tax, card, and interest bankruptcies return direct properties to the bank and return player-held shares to the issuing corporation's treasury share pool. Corporation-owned properties remain with the corporation unless the corporation itself becomes insolvent.
 
 ---
 

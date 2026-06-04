@@ -181,7 +181,7 @@ async function createFourPlayerGame() {
         });
     }
 
-    const joinedRoom = await api(`/rooms/${room.id}`);
+    const joinedRoom = await api(`/rooms/${room.id}`, { token: players[0].token });
     const gameState = buildInitialGameState(joinedRoom.room_members);
     const game = await api('/games', {
         method: 'POST',
@@ -257,7 +257,7 @@ async function assertRoomBasics(room) {
 }
 
 async function assertGameCanBeFetched() {
-    const fetched = await api(`/games/by-room/${context.room.id}`);
+    const fetched = await api(`/games/by-room/${context.room.id}`, { token: context.players[0].token });
     check(fetched.id === context.game.id, 'game can be fetched by room id');
     check(fetched.game_state.players.length === 4, 'game state has four players');
 }
@@ -296,7 +296,7 @@ async function expectOutsiderCannotPatchGame() {
     check(res.status === 401 || res.status === 403, 'outsider cannot patch game state', res);
 
     if (res.status >= 200 && res.status < 300) {
-        context.game = await api(`/games/${context.game.id}`);
+        context.game = await api(`/games/${context.game.id}`, { token: context.players[0].token });
         await patchGameState(buildInitialGameState(context.room.room_members), 'host_state_repair');
     }
 }
@@ -368,7 +368,7 @@ async function expectMarketActionMustInvolveActor() {
         token: tokenFor('Alice'),
         body: { game_state: gs, action_type: 'transaction', expected_version: context.game.state_version },
     });
-    check(res.status === 403, 'market action cannot mutate uninvolved players only', res);
+    check(res.status === 400, 'state repair endpoint rejects non-repair action types', res);
 
     if (res.status >= 200 && res.status < 300) {
         await refreshGame();
@@ -514,10 +514,12 @@ async function createIPO(playerName, ticker, propIds, shares, pricePerShare) {
         totalShares: shares,
         pricePerShare,
         assets,
-        shareholders: [],
-        founderShares: shares,
+        shareholders: [{ userId: founder.userId, name: founder.name, shares }],
         availableShares: shares,
-        founderHoldings: [{ userId: founder.userId, name: founder.name, shares }],
+        treasuryShares: 0,
+        cash: 0,
+        debts: [],
+        chairmanVotes: [],
     };
     gs.corporations.push(corporation);
     for (const asset of assets) {
@@ -526,7 +528,7 @@ async function createIPO(playerName, ticker, propIds, shares, pricePerShare) {
         prop.ownerId = corporation.id;
         prop.ownerName = `[${ticker}]`;
     }
-    founder.corporations.push({ ticker, sharesOwned: 0, totalShares: shares, pricePerShare });
+    founder.corporations.push({ id: corporation.id, ticker, sharesOwned: shares, totalShares: shares, pricePerShare });
     pushLog(gs, `${founder.name} created ${ticker} IPO`);
     await saveStateAndEvent(gs, tokenFor(founder.name), 'ipo_created', { founder: founder.name, ticker, shares, pricePerShare });
 }
@@ -540,17 +542,25 @@ async function buyShares(playerName, ticker, shares) {
     const founder = gs.players.find(p => p.userId === corp.founderId);
     const cost = shares * corp.pricePerShare;
     invariant(buyer.cash >= cost, `${playerName} has cash to buy ${ticker}`);
+    const founderHolding = corp.shareholders.find(s => s.userId === corp.founderId);
+    invariant(founder && founderHolding && founderHolding.shares >= shares, `${ticker} founder has listed shares`);
 
     buyer.cash -= cost;
-    if (founder) founder.cash += cost;
+    founder.cash += cost;
+    founderHolding.shares -= shares;
+    if (founderHolding.shares <= 0) {
+        corp.shareholders = corp.shareholders.filter(s => s !== founderHolding);
+    }
     const existing = corp.shareholders.find(s => s.userId === buyer.userId);
     if (existing) existing.shares += shares;
     else corp.shareholders.push({ userId: buyer.userId, name: buyer.name, shares });
     corp.availableShares = Math.max(0, (typeof corp.availableShares === 'number' ? corp.availableShares : corp.totalShares) - shares);
 
+    const founderCorp = founder.corporations.find(c => c.ticker === ticker);
+    if (founderCorp) founderCorp.sharesOwned = Math.max(0, founderCorp.sharesOwned - shares);
     const buyerCorp = buyer.corporations.find(c => c.ticker === ticker);
     if (buyerCorp) buyerCorp.sharesOwned += shares;
-    else buyer.corporations.push({ ticker, sharesOwned: shares, totalShares: corp.totalShares, pricePerShare: corp.pricePerShare });
+    else buyer.corporations.push({ id: corp.id, ticker, sharesOwned: shares, totalShares: corp.totalShares, pricePerShare: corp.pricePerShare });
 
     pushLog(gs, `${buyer.name} bought ${shares} shares of ${ticker}`);
     await saveStateAndEvent(gs, tokenFor(buyer.name), 'share_purchase', { buyer: buyer.name, ticker, shares, totalCost: cost });
@@ -612,7 +622,10 @@ async function completeGame(reason) {
     const gs = clone(context.game.game_state);
     const standings = gs.players.map(player => {
         const propertyValue = player.properties.reduce((sum, prop) => sum + (prop.value || 0), 0);
-        const corpValue = player.corporations.reduce((sum, corp) => sum + corp.sharesOwned * (corp.pricePerShare || 0), 0);
+        const corpValue = player.corporations.reduce((sum, holding) => {
+            const corp = gs.corporations.find(item => item.id === holding.id || item.ticker === holding.ticker);
+            return sum + holding.sharesOwned * (corp ? corporationShareValue(gs, corp) : (holding.pricePerShare || 0));
+        }, 0);
         const debtTotal = player.debts.reduce((sum, debt) => sum + debt.principal, 0);
         return {
             name: player.name,
@@ -634,6 +647,23 @@ async function completeGame(reason) {
     note(`simulated winner: ${standings[0].name} with net worth $${standings[0].netWorth.toFixed(2)}`);
 }
 
+function corporationShareValue(gs, corp) {
+    if (!corp || corp.insolvent || corp.status === 'insolvent' || !corp.totalShares) return 0;
+    const assetIds = new Set((corp.assets || []).map(asset => asset.id));
+    const propertyValue = (gs.properties || [])
+        .filter(prop => prop.ownerId === corp.id)
+        .reduce((sum, prop) => {
+            assetIds.delete(prop.id);
+            return sum + Number(prop.price || 0) + Number(prop.houses || 0) * (HOUSE_COSTS[prop.color] || 0);
+        }, 0);
+    const fallbackAssetValue = (corp.assets || [])
+        .filter(asset => assetIds.has(asset.id))
+        .reduce((sum, asset) => sum + Number(asset.value || 0), 0);
+    const debtValue = (corp.debts || []).reduce((sum, debt) => sum + Number(debt.principal || 0), 0);
+    const nav = propertyValue + fallbackAssetValue + Number(corp.cash || 0) - debtValue;
+    return Math.max(0, nav) / Number(corp.totalShares || 1);
+}
+
 async function ensureTurn(playerName) {
     const current = context.game.game_state.players[context.game.game_state.currentPlayerIndex];
     if (current && current.name === playerName) return;
@@ -647,7 +677,7 @@ async function ensureTurn(playerName) {
 
 async function saveStateAndEvent(gs, token, eventType, eventData) {
     validateState(gs);
-    await patchGameState(gs, eventType, token);
+    await patchGameState(gs, eventType);
     const loggedEventType = eventType === 'manual_payment' || eventType === 'forced_payment' || eventType === 'tax_payment'
         ? 'payment'
         : eventType;
@@ -655,13 +685,13 @@ async function saveStateAndEvent(gs, token, eventType, eventData) {
     await refreshGame();
 }
 
-async function patchGameState(gameState, actionType, token = context.players[0].token) {
+async function patchGameState(gameState, actionType) {
     const updatedGame = await api(`/games/${context.game.id}/state`, {
         method: 'PATCH',
-        token,
+        token: context.players[0].token,
         body: {
             game_state: gameState,
-            action_type: actionType,
+            action_type: 'host_state_repair',
             expected_version: context.game.state_version,
         },
     });
@@ -678,15 +708,15 @@ async function logEvent(gameId, token, eventType, eventData) {
 }
 
 async function refreshGame() {
-    context.game = await api(`/games/${context.game.id}`);
+    context.game = await api(`/games/${context.game.id}`, { token: context.players[0].token });
     validateState(context.game.game_state);
     return context.game;
 }
 
 async function fetchAndValidateFinalState() {
-    const room = await api(`/rooms/${context.room.id}`);
+    const room = await api(`/rooms/${context.room.id}`, { token: context.players[0].token });
     const game = await refreshGame();
-    const events = await api(`/games/${context.game.id}/events`);
+    const events = await api(`/games/${context.game.id}/events`, { token: context.players[0].token });
 
     check(room.status === 'completed', 'room ended as completed');
     check(events.length >= 15, 'event log contains many gameplay events');

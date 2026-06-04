@@ -29,6 +29,7 @@ This roadmap tracks what needs to be true before people can reliably play Mortga
 - Added a post-bankruptcy liquidation summary modal so players can see the cause, asset destination, share movement, and debt cleanup immediately after declaring bankruptcy.
 - Added a visible Bankrupt badge on player cards.
 - Added corporation insolvency: corporate interest can close an underfunded corporation, return corporation-owned properties to the bank, clear improvements, wipe debts/shares, close governance, and show an Insolvent state in the UI.
+- Reworked IPO ownership: founders now receive all shares at IPO creation, listed founder-share purchases pay the founder, bankruptcy-returned shares sit in treasury, and corporation stake value uses NAV instead of listing price.
 - Fixed Jail edge cases: rolling doubles to leave Jail now consumes the turn roll, forced third-turn bail is logged as a bank payment, and bail-driven negative cash uses the normal bankruptcy warning path.
 - Added targeted bank-return bankruptcy coverage for tax, card-payment, Jail bail, and debt-interest negative-cash paths.
 - Added operational readiness basics: database hot-path indexes, a DB-backed health endpoint, and structured game-action audit logging with game/room/action/version metadata.
@@ -40,13 +41,13 @@ This roadmap tracks what needs to be true before people can reliably play Mortga
 
 ### 1. Bankruptcy, liquidation, and creditor policy
 
-Current coverage: player bankruptcy is final. The bankrupt player is marked out, skipped in future turns, blocked from normal actions, and any pending trade offer involving them is canceled. Directly owned properties return to the bank for bank-style bankruptcies, and transfer to the player or corporation creditor for unresolved rent claims. Houses/hotels are cleared, personal debts are cleared, shares return to corporation availability for bank/corporation-creditor cases, shares transfer to the player creditor for player-creditor rent bankruptcy, and chairmanship is reassigned to an active non-bankrupt shareholder or founder when possible. Corporation-owned properties remain with the corporation unless the corporation itself becomes insolvent. Corporation insolvency is final: assets return to the bank, improvements are cleared, debts and shares are wiped, and governance is closed.
+Current coverage: player bankruptcy is final. The bankrupt player is marked out, skipped in future turns, blocked from normal actions, and any pending trade offer involving them is canceled. Directly owned properties return to the bank for bank-style bankruptcies, and transfer to the player or corporation creditor for unresolved rent claims. Houses/hotels are cleared, personal debts are cleared, shares return to corporation treasury for bank/corporation-creditor cases, shares transfer to the player creditor for player-creditor rent bankruptcy, and chairmanship is reassigned to an active non-bankrupt shareholder or founder when possible. Corporation-owned properties remain with the corporation unless the corporation itself becomes insolvent. Corporation insolvency is final: assets return to the bank, improvements are cleared, debts and shares are wiped, and governance is closed.
 
 Decisions needed:
 
 - Should bankruptcy liquidation ever trigger automatic auctions for released properties, or is bank return the permanent rule?
 - Should corporation insolvency ever trigger automatic auctions for released properties, or is bank return the permanent rule?
-- Should released shares be sold immediately, queued for auction, or stay available at the corporation's current share price?
+- Should treasury-returned shares be sold immediately, queued for auction, or stay listed at the corporation's current asking price?
 
 Acceptance criteria:
 
@@ -94,7 +95,7 @@ Acceptance criteria:
 
 Corporations are playable, and the first production insolvency policy is now defined.
 
-Current coverage: corporate rent flows into treasury, corporate debt can be issued by the chairman or controlling shareholder, shares can be purchased only while the corporation is active, chairman changes and shareholder votes are blocked after insolvency, and a corporation that falls below $0 from corporate interest closes as insolvent.
+Current coverage: corporate rent flows into treasury, corporate debt can be issued by the chairman or controlling shareholder, founders receive all IPO shares, listed founder-share purchases pay the founder, treasury-share purchases pay the corporation, share value uses corporation NAV, shares can be purchased only while the corporation is active, chairman changes and shareholder votes are blocked after insolvency, and a corporation that falls below $0 from corporate interest closes as insolvent.
 
 Acceptance criteria:
 

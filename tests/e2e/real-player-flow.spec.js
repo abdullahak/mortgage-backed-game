@@ -84,7 +84,8 @@ test.describe('thorough real-player UI game flow', () => {
             await createIpo(pages.Alice, 'BRWN', 8, 50, 'prop-0');
             await shot(testInfo, pages.Alice, '13-alice-creates-ipo');
 
-            await expectCorporationDetails(pages.Alice, 'BRWN', /No public shares sold yet/i);
+            await expectCorporationDetails(pages.Alice, 'BRWN', /Alice:\s*8 shares \(100\.0%\)/i);
+            await expectCorporationDetails(pages.Alice, 'BRWN', /Listed Shares:\s*8 \(8 founder, 0 treasury\)/i);
             await issueCorporationDebt(pages.Alice, 'BRWN', 100);
             await shot(testInfo, pages.Alice, '13b-alice-issues-corporation-debt');
 

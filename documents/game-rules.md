@@ -189,24 +189,30 @@ Any player may bundle one or more of their properties into a corporation and sel
 
 1. On your turn, go to the **Game** tab and click **Create IPO**.
 2. Select the properties to include as corporate assets.
-3. Set a **ticker symbol** (e.g., `MBS`), the **number of shares** to issue, and the **price per share**.
-4. Click **Create** — the selected properties transfer into the corporation and you start with all shares.
+3. Set a **ticker symbol** (e.g., `MBS`), the **number of shares** to issue, and the **listing price per share**.
+4. Click **Create** — the selected properties transfer into the corporation, you receive all founder shares, and those founder-held shares are listed for sale.
 
 ### Selling Shares
 
-Other players can buy available shares from the **Corporations** modal (accessible via the **Game** tab during their turn). When a player buys shares:
+Other players can buy listed shares from the **Corporations** modal (accessible via the **Game** tab during their turn). When a player buys founder-listed shares:
 
-- Their cash is deducted by `shares × price per share`.
-- The payment goes into the corporation treasury.
-- The buyer's shareholding is recorded on the corporation ledger.
+- Their cash is deducted by `shares × listing price`.
+- The payment goes to the founder.
+- The shares move from the founder to the buyer on the corporation ledger.
+
+If bankruptcy has returned shares to the corporation treasury, those treasury shares may also be listed for sale. Treasury-share purchases pay the corporation treasury instead of the founder.
 
 ### Founder Mechanics
 
-The founder starts as chairman. The public shareholder ledger begins empty, and purchased shares reduce the corporation's available share count. The founder cannot buy shares in their own corporation.
+The founder starts as chairman and begins with 100% of the corporation's shares. Listed founder shares are the founder's shares offered for sale to other players. The founder cannot buy their own listed shares, but can buy treasury shares if bankruptcy later returns shares to the corporation treasury.
 
 ### Corporation Value in Net Worth
 
-A player's stake in any corporation contributes `sharesOwned × pricePerShare` to their net worth at game end.
+A player's stake in any corporation contributes `sharesOwned × shareValue` to their net worth at game end. Share value uses corporation net asset value, not the listing price:
+
+```
+shareValue = max(0, corporation property value + treasury cash - corporation debt) / totalShares
+```
 
 ### Corporation Insolvency
 
@@ -214,7 +220,7 @@ If a corporation's treasury falls below $0 when corporate debt interest is charg
 
 - Corporation-owned properties return to the bank and any houses/hotels are cleared.
 - Corporation debts are wiped.
-- Shareholder positions are wiped, available shares become 0, and the share price becomes $0.
+- Shareholder positions are wiped, listed and treasury shares become 0, and the listing price becomes $0.
 - The chairman seat is cleared and open chairman votes are closed.
 - Insolvent corporations cannot collect rent, sell shares, issue debt, or use chairman governance controls.
 
@@ -272,10 +278,10 @@ Bankruptcy is triggered automatically when your **cash drops below $0 at the end
 If you cannot afford rent owed to another player or corporation, you pay only the cash you actually have and the unpaid remainder is tracked as a claim. If you raise enough cash before ending the turn, that claim is paid and bankruptcy is avoided. If the claim is still unpaid when you end the turn:
 
 - Rent owed to a player transfers your directly owned properties and player-held corporation shares to that player.
-- Rent owed to a corporation transfers your directly owned properties to that corporation. Player-held shares return to their issuing corporation's available share pool.
+- Rent owed to a corporation transfers your directly owned properties to that corporation. Player-held shares return to their issuing corporation's treasury share pool.
 - Houses/hotels on transferred properties are removed.
 
-Bank, tax, card, jail bail, and interest bankruptcies return your directly owned properties to the bank and return player-held shares to their issuing corporation's available share pool. Bankruptcy is final. Corporation-owned properties and corporation debts stay with the corporation unless that corporation later becomes insolvent.
+Bank, tax, card, jail bail, and interest bankruptcies return your directly owned properties to the bank and return player-held shares to their issuing corporation's treasury share pool. Bankruptcy is final. Corporation-owned properties and corporation debts stay with the corporation unless that corporation later becomes insolvent.
 
 ---
 
@@ -353,11 +359,11 @@ When the game ends, final standings are determined by:
 ```
 Net Worth = Cash
           + Sum of owned property values
-          + Sum of (sharesOwned × pricePerShare) across all corporations
+          + Sum of (sharesOwned × corporation share value) across all corporations
           − Total outstanding debt principal
 ```
 
-Property value is recorded at purchase price. There is no market appreciation or depreciation of individual properties — their book value stays at what you paid (or what was set when transferred in a trade).
+Property value is recorded at purchase price plus houses/hotels. Corporation share value is based on the corporation's property value, treasury cash, and outstanding corporate debt; listing price is only the asking price for share purchases.
 
 ---
 
