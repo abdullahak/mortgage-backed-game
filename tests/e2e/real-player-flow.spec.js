@@ -177,6 +177,8 @@ test.describe('thorough real-player UI game flow', () => {
             await openTab(pages.Dave, 'Board');
             await shot(testInfo, pages.Dave, '24-dave-board-mobile-ish-view');
 
+            await repairGameState(pages.Alice, { current: 'Dave', diceRolled: { Dave: true } });
+            await reloadGamePages(pages, ['Dave']);
             await endTurnNoAssert(pages.Dave);
             await repairGameState(pages.Alice, { current: 'Alice', diceRolled: { Alice: true } });
             await reloadGamePages(pages, ['Alice']);
@@ -411,7 +413,7 @@ async function rollAndPayRent(page, dice, ownerName) {
     await openTab(page, 'Game');
     await page.evaluate(dice => { window.__E2E_NEXT_DICE = dice.slice(); }, dice);
     await clickAndWaitForGameVersion(page, activeGameButton(page, 'rollDiceAndMove()'));
-    await expect(page.locator('#gameContent')).toContainText(new RegExp(`paid \\$\\d+(?:\\.\\d+)? rent to ${ownerName}`, 'i'), { timeout: 10000 });
+    await expect(page.locator('#gameContent')).toContainText(new RegExp(`paid \\$\\d+(?:\\.\\d+)? to ${ownerName} for Rent`, 'i'), { timeout: 10000 });
 }
 
 async function rollWithDiceAndExpect(page, dice, expectedText) {
@@ -441,7 +443,9 @@ async function tradeCashForProperty(page, cashFrom, propertyFrom, cashAmount, pr
 
 async function makePayment(page, fromName, toName, amount) {
     await openTab(page, 'Market');
-    await selectByVisibleText(page.locator('#paymentFromPlayer'), fromName);
+    const fromSelect = page.locator('#paymentFromPlayer');
+    await expect(fromSelect).toBeDisabled({ timeout: 10000 });
+    await expect(fromSelect.locator('option:checked')).toHaveText(fromName, { timeout: 10000 });
     await selectByVisibleText(page.locator('#paymentToPlayer'), toName);
     await page.locator('#paymentAmount').fill(String(amount));
     await clickAndWaitForGameVersion(page, page.locator('button[onclick="makePayment()"]'));

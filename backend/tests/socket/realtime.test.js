@@ -219,6 +219,7 @@ describe('game:state_update broadcasts', () => {
         const gs = buildGameState(['Alice', 'Bob']);
         gs.players[0].userId = uid1;
         gs.players[1].userId = uid2;
+        gs.players[0].diceRolled = true;
 
         // Create game
         const createRes = await request(app)
@@ -263,6 +264,7 @@ describe('game:state_update broadcasts', () => {
         const gs = buildGameState(['Alice', 'Bob']);
         gs.players[0].userId = uid1;
         gs.players[1].userId = uid2;
+        gs.players[0].diceRolled = true;
         const createRes = await request(app)
             .post('/api/games')
             .set('Authorization', `Bearer ${t1}`)

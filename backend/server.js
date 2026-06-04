@@ -18,6 +18,10 @@ const io = new Server(server, {
     cors: getCorsOptions(config)
 });
 
+if (config.trustProxy !== false) {
+    app.set('trust proxy', config.trustProxy);
+}
+
 const roomsRouter = require('./routes/rooms')(io);
 const gamesRouter = require('./routes/games')(io);
 
@@ -30,7 +34,28 @@ app.use('/api/rooms', roomsRouter);
 app.use('/api/games', gamesRouter);
 
 // Health check
-app.get('/api/health', (req, res) => res.json({ ok: true }));
+app.get('/api/health', (_req, res) => {
+    try {
+        const ping = db.prepare(`SELECT 1 AS ok`).get();
+        const migrations = db.prepare(`SELECT COUNT(*) AS count FROM schema_migrations`).get();
+        res.json({
+            ok: ping.ok === 1,
+            env: config.env,
+            uptimeSeconds: Math.floor(process.uptime()),
+            db: {
+                ok: ping.ok === 1,
+                migrationsApplied: Number(migrations.count || 0),
+            },
+        });
+    } catch (err) {
+        res.status(503).json({
+            ok: false,
+            env: config.env,
+            db: { ok: false },
+            error: err.message,
+        });
+    }
+});
 
 // ----------------------------------------------------------------
 // Socket.io — real-time events

@@ -187,10 +187,10 @@ body {
 .hero {
   background: linear-gradient(135deg, #0D1F2D 0%, #1B4332 50%, #2D6A4F 100%);
   color: white;
-  padding: 160px 2rem 120px;
+  padding: 140px 2rem 88px;
   position: relative;
   overflow: hidden;
-  min-height: 100vh;
+  min-height: min(860px, 92vh);
   display: flex;
   align-items: center;
 }
@@ -629,7 +629,7 @@ body {
 
 /* ── Features Section ───────────────────────────────────────── */
 .features {
-  padding: 110px 2rem;
+  padding: 80px 2rem;
   background: var(--color-surface);
 }
 
@@ -738,7 +738,7 @@ body {
 
 /* ── How It Works ───────────────────────────────────────────── */
 .how-it-works {
-  padding: 110px 2rem;
+  padding: 80px 2rem;
   background: var(--color-white);
 }
 
@@ -827,7 +827,7 @@ body {
 
 /* ── CTA Section ────────────────────────────────────────────── */
 .cta-section {
-  padding: 120px 2rem;
+  padding: 90px 2rem;
   background: linear-gradient(135deg, #0D1F2D 0%, #1B4332 50%, #2D6A4F 100%);
   color: white;
   text-align: center;
@@ -991,8 +991,8 @@ body {
 
 /* ── Scroll Reveal Animations ───────────────────────────────── */
 .reveal {
-  opacity: 0;
-  transform: translateY(28px);
+  opacity: 1;
+  transform: translateY(0);
   transition:
     opacity   0.65s var(--ease-out),
     transform 0.65s var(--ease-out);

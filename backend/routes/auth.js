@@ -6,12 +6,22 @@ const jwt = require('jsonwebtoken');
 const { sendEmail } = require('../mailer');
 const db = require('../db');
 const { getConfig } = require('../config');
+const { createRateLimiter, getRequestActorKey } = require('../rateLimit');
 
 const config = getConfig();
 const JWT_SECRET = config.jwtSecret;
 const JWT_EXPIRY = config.jwtExpiry;
 const otpSendLimits = new Map();
 const otpVerifyLimits = new Map();
+const authRateLimit = createRateLimiter({
+    name: 'auth',
+    ...config.rateLimits.auth,
+    keyGenerator: req => {
+        const email = String(req.body?.email || '').trim().toLowerCase();
+        const emailKey = email ? `:email:${email}` : '';
+        return `${getRequestActorKey(req)}:${req.method}:${req.path}${emailKey}`;
+    },
+});
 
 // Middleware: verify JWT and attach user
 function requireAuth(req, res, next) {
@@ -35,7 +45,7 @@ function makeToken(userId) {
 
 
 // POST /api/auth/send-otp
-router.post('/send-otp', async (req, res) => {
+router.post('/send-otp', authRateLimit, async (req, res) => {
     const { email } = req.body;
     if (!email || !email.includes('@')) {
         return res.status(400).json({ error: 'Valid email required' });
@@ -75,7 +85,7 @@ router.post('/send-otp', async (req, res) => {
 });
 
 // POST /api/auth/verify-otp
-router.post('/verify-otp', (req, res) => {
+router.post('/verify-otp', authRateLimit, (req, res) => {
     const { email, token } = req.body;
     if (!email || !token) {
         return res.status(400).json({ error: 'email and token required' });
@@ -111,7 +121,7 @@ router.post('/verify-otp', (req, res) => {
 });
 
 // POST /api/auth/anonymous
-router.post('/anonymous', (req, res) => {
+router.post('/anonymous', authRateLimit, (req, res) => {
     const userId = uuidv4();
     db.prepare(`INSERT INTO users (id, email, is_anonymous) VALUES (?, NULL, 1)`).run(userId);
     res.json({ token: makeToken(userId), user: { id: userId, email: null, is_anonymous: true } });

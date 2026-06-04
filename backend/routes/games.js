@@ -3,6 +3,8 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const { requireAuth } = require('./auth');
 const { getConfig } = require('../config');
+const { buildGameActionAuditRecord, logGameActionAudit } = require('../audit');
+const { createRateLimiter, getRequestActorKey } = require('../rateLimit');
 const {
     createInitialGame,
     normalizeState,
@@ -18,6 +20,47 @@ const {
 module.exports = (io) => {
 const router = express.Router();
 const config = getConfig();
+const gameActionRateLimit = createRateLimiter({
+    name: 'game_action',
+    ...config.rateLimits.gameAction,
+    keyGenerator: req => `${req.params.id}:${getRequestActorKey(req)}`,
+});
+const manualEventRateLimit = createRateLimiter({
+    name: 'manual_event',
+    ...config.rateLimits.manualEvent,
+    keyGenerator: req => `${req.params.id}:${getRequestActorKey(req)}`,
+});
+const TURN_ACTIONS = new Set([
+    'roll_dice',
+    'buy_property',
+    'start_auction',
+    'end_turn',
+    'create_ipo',
+    'buy_shares',
+    'issue_debt',
+    'pay_debt',
+    'buy_houses',
+]);
+const OUT_OF_TURN_ACTIONS = new Set([
+    'place_bid',
+    'pass_auction',
+    'change_chairman',
+    'propose_chairman_vote',
+    'support_chairman_vote',
+    'propose_trade',
+    'accept_trade',
+    'cancel_trade',
+    'trade',
+    'manual_payment',
+]);
+const HOST_ACTIONS = new Set([
+    'host_state_repair',
+    'host_cancel_auction',
+    'host_cancel_trade_offer',
+    'host_pause_game',
+    'host_resume_game',
+    'host_end_game',
+]);
 
 function parseGame(game) {
     const gameState = normalizeState(JSON.parse(game.game_state));
@@ -134,6 +177,14 @@ function makeActionResponse(game, events) {
     };
 }
 
+function safeRollback() {
+    try {
+        db.exec('ROLLBACK');
+    } catch (err) {
+        if (!/no transaction is active/i.test(err.message || '')) throw err;
+    }
+}
+
 function requireMember(req, res, next) {
     const game = db.prepare(`SELECT * FROM games WHERE id = ?`).get(req.params.id);
     if (!game) return res.status(404).json({ error: 'Game not found' });
@@ -180,7 +231,7 @@ router.post('/', requireAuth, (req, res) => {
         }));
         db.exec('COMMIT');
     } catch (err) {
-        db.exec('ROLLBACK');
+        safeRollback();
         throw err;
     }
 
@@ -206,7 +257,7 @@ router.get('/:id', requireAuth, (req, res) => {
 });
 
 // POST /api/games/:id/actions — authoritative game action
-router.post('/:id/actions', requireAuth, requireMember, (req, res) => {
+router.post('/:id/actions', requireAuth, requireMember, gameActionRateLimit, (req, res) => {
     const { actionId, type, payload, expectedVersion } = req.body;
     if (!actionId || !type) return res.status(400).json({ error: 'actionId and type required' });
     if (typeof expectedVersion !== 'number') return res.status(400).json({ error: 'expectedVersion required' });
@@ -248,8 +299,16 @@ router.post('/:id/actions', requireAuth, requireMember, (req, res) => {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `).run(uuidv4(), req.params.id, req.userId, actionId, type, JSON.stringify(req.body), JSON.stringify(result), updatedGame.state_version);
         db.exec('COMMIT');
+        logGameActionAudit(buildGameActionAuditRecord({
+            game,
+            updatedGame,
+            actorUserId: req.userId,
+            actionId,
+            actionType: type,
+            events,
+        }), config);
     } catch (err) {
-        db.exec('ROLLBACK');
+        safeRollback();
         if (err instanceof GameRuleError) {
             const body = err.status === 409
                 ? { error: err.message, state_version: db.prepare(`SELECT state_version FROM games WHERE id = ?`).get(req.params.id)?.state_version }
@@ -298,13 +357,9 @@ router.patch('/:id/state', requireAuth, (req, res) => {
 });
 
 // POST /api/games/:id/events — log a game event
-router.post('/:id/events', requireAuth, (req, res) => {
+router.post('/:id/events', requireAuth, requireMember, manualEventRateLimit, (req, res) => {
     const { event_type, event_data } = req.body;
     if (!event_type) return res.status(400).json({ error: 'event_type required' });
-
-    const game = db.prepare(`SELECT * FROM games WHERE id = ?`).get(req.params.id);
-    if (!game) return res.status(404).json({ error: 'Game not found' });
-    if (!isRoomMember(game.room_id, req.userId)) return res.status(403).json({ error: 'Not a room member' });
 
     const eventId = uuidv4();
     db.prepare(`

@@ -83,7 +83,7 @@ const CHANCE_CARDS = [
     { id: 'ch-1', text: 'Advance to GO. Collect $200.', action: { type: 'advance_to', position: 0 } },
     { id: 'ch-2', text: 'Advance to Illinois Ave.', action: { type: 'advance_to', position: 24 } },
     { id: 'ch-3', text: 'Advance to St. Charles Place.', action: { type: 'advance_to', position: 11 } },
-    { id: 'ch-4', text: 'Advance to nearest Utility. If owned, pay 10x your dice roll.', action: { type: 'advance_nearest', nearestType: 'utility' } },
+    { id: 'ch-4', text: 'Advance to nearest Utility. If owned, pay 10x your dice roll.', action: { type: 'advance_nearest', nearestType: 'utility', utilityMultiplier: 10 } },
     { id: 'ch-5', text: 'Advance to nearest Railroad. Pay owner twice the normal rent.', action: { type: 'advance_nearest', nearestType: 'railroad', rentMultiplier: 2 } },
     { id: 'ch-6', text: 'Bank pays you a dividend of $50.', action: { type: 'collect', amount: 50 } },
     { id: 'ch-7', text: 'Get Out of Jail Free.', action: { type: 'get_out_of_jail' } },
@@ -168,13 +168,46 @@ function normalizeState(raw) {
         corp.debts = Array.isArray(corp.debts) ? corp.debts : [];
         corp.chairmanVotes = Array.isArray(corp.chairmanVotes) ? corp.chairmanVotes : [];
         corp.cash = Number(corp.cash || 0);
+        corp.insolvent = !!corp.insolvent || corp.status === 'insolvent';
+        corp.status = corp.insolvent ? 'insolvent' : (corp.status || 'active');
         corp.availableShares = Number(corp.availableShares ?? corp.totalShares ?? 0);
-        corp.chairmanId = corp.chairmanId || corp.founderId || null;
-        corp.chairmanName = corp.chairmanName || corp.founderName || null;
+        if (corp.insolvent) {
+            corp.chairmanId = corp.chairmanId || null;
+            corp.chairmanName = corp.chairmanName || null;
+        } else {
+            corp.chairmanId = corp.chairmanId || corp.founderId || null;
+            corp.chairmanName = corp.chairmanName || corp.founderName || null;
+        }
     });
     state.gameLog = Array.isArray(state.gameLog) ? state.gameLog.slice(-100) : [];
+    state.settings = {
+        passGoAmount: 200,
+        startingCash: 1500,
+        interestRate: 5,
+        auctionTimeoutMs: 120000,
+        tradeOfferTimeoutMs: 600000,
+        ...(state.settings || {}),
+    };
+    state.paused = !!state.paused;
+    state.pause = state.paused ? normalizePauseState(state.pause) : null;
+    state.pauseHistory = Array.isArray(state.pauseHistory) ? state.pauseHistory.slice(-20) : [];
+    state.marketOffers = Array.isArray(state.marketOffers)
+        ? state.marketOffers.map(offer => ({
+            ...offer,
+            player1Cash: Number(offer.player1Cash || 0),
+            player2Cash: Number(offer.player2Cash || 0),
+            player1AssetIds: Array.isArray(offer.player1AssetIds) ? offer.player1AssetIds : [],
+            player2AssetIds: Array.isArray(offer.player2AssetIds) ? offer.player2AssetIds : [],
+            status: offer.status || 'pending',
+            createdAt: normalizeDateString(offer.createdAt),
+            expiresAt: offer.expiresAt || ((offer.status || 'pending') === 'pending'
+                ? tradeOfferExpiryFrom(state, normalizeDate(offer.createdAt))
+                : null),
+        }))
+        : [];
+    state.auction = normalizeAuction(state.auction);
+    state.bankruptcyClaims = normalizeBankruptcyClaims(state.bankruptcyClaims);
     state.turnCashFlow = state.turnCashFlow && typeof state.turnCashFlow === 'object' ? state.turnCashFlow : {};
-    state.settings = { passGoAmount: 200, startingCash: 1500, interestRate: 5, ...(state.settings || {}) };
     state.chanceCards = Array.isArray(state.chanceCards) && state.chanceCards.length ? state.chanceCards : shuffleDeck(CHANCE_CARDS);
     state.communityChestCards = Array.isArray(state.communityChestCards) && state.communityChestCards.length ? state.communityChestCards : shuffleDeck(COMMUNITY_CHEST_CARDS);
     state.currentPlayerIndex = Number.isInteger(state.currentPlayerIndex) ? state.currentPlayerIndex : 0;
@@ -202,6 +235,34 @@ function applyAction(inputState, actorUserId, action, options = {}) {
     const actor = state.players.find(player => player.userId === actorUserId);
     if (!actor) throw new GameRuleError(403, 'Actor is not a player in this game');
     if (state.ended && action.type !== 'host_end_game') throw new GameRuleError(400, 'Game has already ended');
+    const hostControlTypes = new Set(['host_end_game', 'host_pause_game', 'host_resume_game', 'host_cancel_auction', 'host_cancel_trade_offer']);
+    if (actor.bankrupt && !hostControlTypes.has(action.type)) throw new GameRuleError(403, 'Bankrupt player cannot act');
+    const pauseAllowedActionTypes = new Set(['host_pause_game', 'host_resume_game', 'host_end_game', 'host_cancel_auction', 'host_cancel_trade_offer']);
+    if (state.paused && !pauseAllowedActionTypes.has(action.type)) throw new GameRuleError(400, 'Game is paused');
+    const expiredAuction = expireOpenAuctionIfNeeded(state, actor, events);
+    const expiredAuctionActionTypes = new Set(['place_bid', 'pass_auction', 'host_cancel_auction']);
+    if (expiredAuction && expiredAuctionActionTypes.has(action.type)) {
+        if (action.type === 'host_cancel_auction') requireHost(options, actorUserId);
+        syncDerivedPortfolios(state);
+        const invariant = validateStateInvariants(state);
+        if (invariant) throw new GameRuleError(400, invariant);
+        return { state, events };
+    }
+    const tradeOfferResolutionTypes = new Set(['accept_trade', 'cancel_trade', 'host_cancel_trade_offer']);
+    if (tradeOfferResolutionTypes.has(action.type)) {
+        const expiredTradeOfferIds = expirePendingTradeOffersIfNeeded(state, actor, events);
+        if (expiredTradeOfferIds.has((action.payload || {}).offerId)) {
+            if (action.type === 'host_cancel_trade_offer') requireHost(options, actorUserId);
+            syncDerivedPortfolios(state);
+            const invariant = validateStateInvariants(state);
+            if (invariant) throw new GameRuleError(400, invariant);
+            return { state, events };
+        }
+    }
+    const auctionActionTypes = new Set(['start_auction', 'place_bid', 'pass_auction', 'host_cancel_auction', 'host_pause_game', 'host_resume_game', 'host_end_game']);
+    if (state.auction?.status === 'open' && !auctionActionTypes.has(action.type)) {
+        throw new GameRuleError(400, 'Resolve auction before other actions');
+    }
 
     const currentPlayer = state.players[state.currentPlayerIndex];
     const requireTurn = () => {
@@ -218,6 +279,20 @@ function applyAction(inputState, actorUserId, action, options = {}) {
         case 'buy_property':
             requireTurn();
             buyProperty(state, actor, events);
+            break;
+        case 'start_auction':
+            requireTurn();
+            startAuction(state, actor, events);
+            break;
+        case 'place_bid':
+            placeAuctionBid(state, actor, action.payload || {}, events);
+            break;
+        case 'pass_auction':
+            passAuction(state, actor, events);
+            break;
+        case 'host_cancel_auction':
+            requireHost(options, actorUserId);
+            hostCancelAuction(state, actor, events);
             break;
         case 'end_turn':
             requireTurn();
@@ -252,6 +327,27 @@ function applyAction(inputState, actorUserId, action, options = {}) {
             requireTurn();
             buyHouses(state, actor, action.payload || {}, events);
             break;
+        case 'propose_trade':
+            proposeTrade(state, actor, action.payload || {}, events);
+            break;
+        case 'accept_trade':
+            acceptTrade(state, actor, action.payload || {}, events);
+            break;
+        case 'cancel_trade':
+            cancelTrade(state, actor, action.payload || {}, events);
+            break;
+        case 'host_cancel_trade_offer':
+            requireHost(options, actorUserId);
+            hostCancelTradeOffer(state, actor, action.payload || {}, events);
+            break;
+        case 'host_pause_game':
+            requireHost(options, actorUserId);
+            pauseGame(state, actor, action.payload || {}, events);
+            break;
+        case 'host_resume_game':
+            requireHost(options, actorUserId);
+            resumeGame(state, actor, events);
+            break;
         case 'trade':
             trade(state, actor, action.payload || {}, events);
             break;
@@ -259,7 +355,7 @@ function applyAction(inputState, actorUserId, action, options = {}) {
             manualPayment(state, actor, action.payload || {}, events);
             break;
         case 'host_end_game':
-            if (options.hostId && options.hostId !== actorUserId) throw new GameRuleError(403, 'Not the host');
+            requireHost(options, actorUserId);
             finishGame(state, 'Host ended the game.', events);
             break;
         case 'start_game':
@@ -267,6 +363,10 @@ function applyAction(inputState, actorUserId, action, options = {}) {
             break;
         default:
             throw new GameRuleError(400, 'Unknown action type');
+    }
+
+    if (!tradeOfferResolutionTypes.has(action.type)) {
+        expirePendingTradeOffersIfNeeded(state, actor, events);
     }
 
     syncDerivedPortfolios(state);
@@ -281,9 +381,10 @@ function rollDice(state, player, events, options) {
     const [die1, die2] = Array.isArray(options.dice) ? options.dice : [randomDie(), randomDie()];
     const total = die1 + die2;
     const isDoubles = die1 === die2;
+    const wasInJail = player.inJail;
     state.lastDiceRoll = [die1, die2];
 
-    if (isDoubles) {
+    if (!wasInJail && isDoubles) {
         player.doubleCount += 1;
         if (player.doubleCount >= 3) {
             sendToJail(player);
@@ -292,11 +393,11 @@ function rollDice(state, player, events, options) {
             events.push(makeEvent(player, 'dice_roll', { die1, die2, total, isDoubles, sentToJail: true }));
             return;
         }
-    } else {
+    } else if (!wasInJail) {
         player.doubleCount = 0;
     }
 
-    if (player.inJail) {
+    if (wasInJail) {
         if (player.hasGetOutOfJailCard) {
             player.hasGetOutOfJailCard = false;
             player.inJail = false;
@@ -310,9 +411,11 @@ function rollDice(state, player, events, options) {
             player.jailTurns += 1;
             if (player.jailTurns >= 3) {
                 player.cash -= 50;
+                recordCashFlow(state, player.userId, null, 50);
                 player.inJail = false;
                 player.jailTurns = 0;
                 events.push(makeEvent(player, 'forced_payment', { from: player.name, to: 'the Bank', amount: 50, reason: 'Jail bail' }));
+                log(state, `${player.name} paid $50 bail after their third Jail turn.`);
             } else {
                 player.diceRolled = true;
                 log(state, `${player.name} is in Jail (turn ${player.jailTurns}/3). Rolled ${die1}+${die2}.`);
@@ -323,10 +426,12 @@ function rollDice(state, player, events, options) {
     }
 
     movePlayer(state, player, total, events);
-    if (!isDoubles) player.diceRolled = true;
+    if (!isDoubles || wasInJail) player.diceRolled = true;
+    if (wasInJail) player.doubleCount = 0;
     const square = BOARD_SQUARES[player.position];
-    log(state, `${player.name} rolled ${die1}+${die2}=${total} - moved to ${square.name}${isDoubles ? ' (doubles - roll again!)' : ''}`);
-    events.push(makeEvent(player, 'dice_roll', { player: player.name, die1, die2, total, isDoubles, square: square.name }));
+    const canRollAgain = isDoubles && !wasInJail;
+    log(state, `${player.name} rolled ${die1}+${die2}=${total} - moved to ${square.name}${canRollAgain ? ' (doubles - roll again!)' : ''}`);
+    events.push(makeEvent(player, 'dice_roll', { player: player.name, die1, die2, total, isDoubles, square: square.name, jailReleased: wasInJail }));
     processLanding(state, player, square, total, events);
 }
 
@@ -343,19 +448,24 @@ function movePlayer(state, player, spaces, events) {
     player.position = newPos;
 }
 
-function processLanding(state, player, square, diceTotal, events) {
+function processLanding(state, player, square, diceTotal, events, options = {}) {
     if (!square) return;
     if (['property', 'railroad', 'utility'].includes(square.type)) {
         const prop = state.properties.find(p => p.id === square.propertyId);
         if (!prop || !prop.ownerId || prop.ownerId === player.userId) return;
         const owner = state.players.find(p => p.userId === prop.ownerId);
-        if (!owner || owner.bankrupt) return;
-        const rent = calculateRent(state, prop.id, diceTotal);
-        player.cash -= rent;
-        owner.cash += rent;
-        recordCashFlow(state, player.userId, owner.userId, rent);
-        events.push(makeEvent(player, 'forced_payment', { from: player.name, to: owner.name, amount: rent, reason: `Rent for ${square.name}` }));
-        log(state, `${player.name} paid $${rent} rent to ${owner.name} for ${square.name}`);
+        const corporationOwner = owner ? null : state.corporations.find(corp => corp.id === prop.ownerId);
+        if (!owner && !corporationOwner) return;
+        if (owner && owner.bankrupt) return;
+        if (corporationOwner && corporationOwner.insolvent) return;
+        const rent = calculateRentForLanding(state, prop.id, diceTotal, options);
+        const creditor = owner
+            ? { type: 'player', id: owner.userId, name: owner.name, entity: owner }
+            : { type: 'corporation', id: corporationOwner.id, name: `[${corporationOwner.ticker}]`, entity: corporationOwner };
+        payCreditorAvailableCash(state, player, creditor, rent, `Rent for ${square.name}`, events, {
+            propertyId: prop.id,
+            propertyName: prop.name,
+        });
         return;
     }
     if (square.type === 'tax') {
@@ -414,7 +524,10 @@ function applyCardEffect(state, player, card, events) {
                 recordCashFlow(state, null, player.userId, state.settings.passGoAmount || 200);
             }
             player.position = nearest;
-            processLanding(state, player, BOARD_SQUARES[player.position], state.lastDiceRoll ? state.lastDiceRoll[0] + state.lastDiceRoll[1] : 0, events);
+            processLanding(state, player, BOARD_SQUARES[player.position], state.lastDiceRoll ? state.lastDiceRoll[0] + state.lastDiceRoll[1] : 0, events, {
+                rentMultiplier: action.rentMultiplier || 1,
+                utilityMultiplier: action.utilityMultiplier || (action.nearestType === 'utility' ? 10 : null),
+            });
             break;
         }
         case 'go_to_jail':
@@ -522,6 +635,196 @@ function buyProperty(state, player, events) {
     log(state, `${player.name} purchased ${prop.name} for $${prop.price.toFixed(2)}`);
 }
 
+function startAuction(state, player, events) {
+    if (state.auction?.status === 'open') throw new GameRuleError(400, 'Auction already in progress');
+    if (!player.diceRolled) throw new GameRuleError(400, 'Roll before starting an auction');
+    const square = BOARD_SQUARES[player.position || 0];
+    if (!square || !square.propertyId) throw new GameRuleError(400, 'You are not on a property');
+    const prop = state.properties.find(p => p.id === square.propertyId);
+    if (!prop || prop.ownerId) throw new GameRuleError(400, 'Property is not available');
+    const now = new Date();
+    const createdAt = now.toISOString();
+
+    state.auction = {
+        id: `auction-${uuidv4()}`,
+        status: 'open',
+        propertyId: prop.id,
+        propertyName: prop.name,
+        startedById: player.userId,
+        startedByName: player.name,
+        currentBid: 0,
+        highBidderId: null,
+        highBidderName: null,
+        passedPlayerIds: [],
+        createdAt,
+        updatedAt: createdAt,
+        expiresAt: auctionExpiryFrom(state, now),
+    };
+    events.push(makeEvent(player, 'property_auction_started', {
+        auctionId: state.auction.id,
+        property: prop.name,
+        startedBy: player.name,
+        expiresAt: state.auction.expiresAt,
+    }));
+    log(state, `${player.name} started an auction for ${prop.name}`);
+}
+
+function placeAuctionBid(state, actor, payload, events) {
+    const auction = getOpenAuction(state);
+    const prop = state.properties.find(p => p.id === auction.propertyId);
+    if (!prop || prop.ownerId) throw new GameRuleError(400, 'Auction property is not available');
+    if ((auction.passedPlayerIds || []).includes(actor.userId)) throw new GameRuleError(400, 'Player has already passed this auction');
+    const amount = positiveNumber(payload.amount, 'bid');
+    if (amount <= Number(auction.currentBid || 0)) throw new GameRuleError(400, 'Bid must exceed current bid');
+    if (actor.cash < amount) throw new GameRuleError(400, 'Insufficient funds');
+
+    auction.currentBid = amount;
+    auction.highBidderId = actor.userId;
+    auction.highBidderName = actor.name;
+    const now = new Date();
+    auction.updatedAt = now.toISOString();
+    auction.expiresAt = auctionExpiryFrom(state, now);
+    events.push(makeEvent(actor, 'property_auction_bid', {
+        auctionId: auction.id,
+        property: auction.propertyName,
+        bidder: actor.name,
+        amount,
+        expiresAt: auction.expiresAt,
+    }));
+    log(state, `${actor.name} bid $${amount.toFixed(2)} for ${auction.propertyName}`);
+}
+
+function passAuction(state, actor, events) {
+    const auction = getOpenAuction(state);
+    if (auction.highBidderId === actor.userId) throw new GameRuleError(400, 'Current high bidder cannot pass');
+    auction.passedPlayerIds = Array.isArray(auction.passedPlayerIds) ? auction.passedPlayerIds : [];
+    if (!auction.passedPlayerIds.includes(actor.userId)) {
+        auction.passedPlayerIds.push(actor.userId);
+        const now = new Date();
+        auction.updatedAt = now.toISOString();
+        auction.expiresAt = auctionExpiryFrom(state, now);
+        events.push(makeEvent(actor, 'property_auction_passed', {
+            auctionId: auction.id,
+            property: auction.propertyName,
+            player: actor.name,
+            expiresAt: auction.expiresAt,
+        }));
+        log(state, `${actor.name} passed on the auction for ${auction.propertyName}`);
+    }
+    settleAuctionIfComplete(state, actor, events);
+}
+
+function settleAuctionIfComplete(state, actor, events) {
+    const auction = getOpenAuction(state);
+    const activePlayers = state.players.filter(player => !player.bankrupt);
+    const passed = new Set(auction.passedPlayerIds || []);
+    const unresolved = activePlayers.filter(player => player.userId !== auction.highBidderId && !passed.has(player.userId));
+    if (unresolved.length > 0) return;
+
+    if (!auction.highBidderId) {
+        closeAuctionNoSale(state, actor, events, 'passes');
+        return;
+    }
+
+    closeAuctionSold(state, actor, events, 'passes');
+}
+
+function expireOpenAuctionIfNeeded(state, actor, events) {
+    if (!state.auction || state.auction.status !== 'open') return false;
+    if (!isAuctionExpired(state.auction)) return false;
+    if (state.auction.highBidderId) {
+        closeAuctionSold(state, actor, events, 'timeout');
+    } else {
+        closeAuctionNoSale(state, actor, events, 'timeout');
+    }
+    return true;
+}
+
+function isAuctionExpired(auction) {
+    if (!auction?.expiresAt) return false;
+    const expiresAt = new Date(auction.expiresAt).getTime();
+    return Number.isFinite(expiresAt) && expiresAt <= Date.now();
+}
+
+function auctionExpiryFrom(state, date = new Date()) {
+    const timeoutMs = Math.max(Number(state.settings?.auctionTimeoutMs || 0), 1000);
+    return new Date(date.getTime() + timeoutMs).toISOString();
+}
+
+function tradeOfferExpiryFrom(state, date = new Date()) {
+    const timeoutMs = Math.max(Number(state.settings?.tradeOfferTimeoutMs || 0), 1000);
+    return new Date(date.getTime() + timeoutMs).toISOString();
+}
+
+function closeAuctionNoSale(state, actor, events, reason) {
+    const auction = getOpenAuction(state);
+    auction.status = 'no_sale';
+    auction.closeReason = reason;
+    auction.resolvedAt = new Date().toISOString();
+    auction.resolvedById = actor.userId;
+    auction.resolvedByName = actor.name;
+    events.push(makeEvent(actor, 'property_auction_no_sale', {
+        auctionId: auction.id,
+        property: auction.propertyName,
+        reason,
+    }));
+    const reasonText = reason === 'timeout' ? ' after timing out' : '';
+    log(state, `Auction for ${auction.propertyName} ended with no sale${reasonText}`);
+}
+
+function closeAuctionSold(state, actor, events, reason) {
+    const auction = getOpenAuction(state);
+    const winner = state.players.find(player => player.userId === auction.highBidderId);
+    const prop = state.properties.find(p => p.id === auction.propertyId);
+    const amount = Number(auction.currentBid || 0);
+    if (!winner || winner.bankrupt) throw new GameRuleError(400, 'Auction winner is not active');
+    if (!prop || prop.ownerId) throw new GameRuleError(400, 'Auction property is not available');
+    if (winner.cash < amount) throw new GameRuleError(400, 'Auction winner has insufficient funds');
+
+    winner.cash -= amount;
+    prop.ownerId = winner.userId;
+    prop.ownerName = winner.name;
+    recordCashFlow(state, winner.userId, null, amount);
+    auction.status = 'sold';
+    auction.closeReason = reason;
+    auction.resolvedAt = new Date().toISOString();
+    auction.resolvedById = actor.userId;
+    auction.resolvedByName = actor.name;
+    auction.winnerId = winner.userId;
+    auction.winnerName = winner.name;
+    auction.finalBid = amount;
+    events.push(makeEvent(actor, 'property_auction_won', {
+        auctionId: auction.id,
+        property: auction.propertyName,
+        winner: winner.name,
+        amount,
+        reason,
+    }));
+    const reasonText = reason === 'timeout' ? ' after the auction timed out' : '';
+    log(state, `${winner.name} won ${auction.propertyName} at auction for $${amount.toFixed(2)}${reasonText}`);
+}
+
+function getOpenAuction(state) {
+    if (!state.auction || state.auction.status !== 'open') throw new GameRuleError(404, 'Open auction not found');
+    return state.auction;
+}
+
+function hostCancelAuction(state, actor, events) {
+    const auction = getOpenAuction(state);
+    auction.status = 'canceled';
+    auction.cancelReason = 'host';
+    auction.resolvedAt = new Date().toISOString();
+    auction.resolvedById = actor.userId;
+    auction.resolvedByName = actor.name;
+    events.push(makeEvent(actor, 'property_auction_canceled', {
+        auctionId: auction.id,
+        property: auction.propertyName,
+        actor: actor.name,
+        reason: 'host',
+    }));
+    log(state, `${actor.name} canceled the auction for ${auction.propertyName}`);
+}
+
 function createIPO(state, player, payload, events) {
     const ticker = String(payload.ticker || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
     const assetIds = Array.isArray(payload.assetIds) ? payload.assetIds : [];
@@ -566,6 +869,7 @@ function createIPO(state, player, payload, events) {
 function buyShares(state, player, payload, events) {
     const corp = state.corporations.find(c => c.id === payload.corpId);
     if (!corp) throw new GameRuleError(404, 'Corporation not found');
+    if (corp.insolvent) throw new GameRuleError(400, 'Corporation is insolvent');
     if (corp.founderId === player.userId) throw new GameRuleError(400, 'Founder cannot buy own shares');
     const shares = positiveInt(payload.shares, 'shares');
     if (shares > corp.availableShares) throw new GameRuleError(400, 'Not enough shares available');
@@ -594,6 +898,7 @@ function issueDebt(state, player, payload, events) {
     if (issuerType === 'corporation') {
         const corp = state.corporations.find(c => c.id === payload.corpId);
         if (!corp) throw new GameRuleError(404, 'Corporation not found');
+        if (corp.insolvent) throw new GameRuleError(400, 'Corporation is insolvent');
         if (!canManageCorporationDebt(corp, player.userId)) {
             throw new GameRuleError(403, 'Only the chairman or controlling shareholder can issue corporation debt');
         }
@@ -623,12 +928,14 @@ function issueDebt(state, player, payload, events) {
 
 function canManageCorporationDebt(corp, userId) {
     if (!corp || !userId) return false;
+    if (corp.insolvent) return false;
     return corp.chairmanId === userId || hasMajorityShares(corp, userId);
 }
 
 function changeChairman(state, actor, payload, events) {
     const corp = state.corporations.find(c => c.id === payload.corpId);
     if (!corp) throw new GameRuleError(404, 'Corporation not found');
+    if (corp.insolvent) throw new GameRuleError(400, 'Corporation is insolvent');
     if (!hasMajorityShares(corp, actor.userId)) throw new GameRuleError(403, 'Majority shares required to change chairman directly');
     const candidate = getChairmanCandidate(state, corp, payload.candidateUserId);
     setChairman(corp, candidate);
@@ -640,6 +947,7 @@ function changeChairman(state, actor, payload, events) {
 function proposeChairmanVote(state, actor, payload, events) {
     const corp = state.corporations.find(c => c.id === payload.corpId);
     if (!corp) throw new GameRuleError(404, 'Corporation not found');
+    if (corp.insolvent) throw new GameRuleError(400, 'Corporation is insolvent');
     const actorShares = sharesFor(corp, actor.userId);
     if (actorShares <= 0) throw new GameRuleError(403, 'Only shareholders can propose chairman votes');
     const candidate = getChairmanCandidate(state, corp, payload.candidateUserId);
@@ -667,6 +975,7 @@ function proposeChairmanVote(state, actor, payload, events) {
 function supportChairmanVote(state, actor, payload, events) {
     const corp = state.corporations.find(c => c.id === payload.corpId);
     if (!corp) throw new GameRuleError(404, 'Corporation not found');
+    if (corp.insolvent) throw new GameRuleError(400, 'Corporation is insolvent');
     const vote = (corp.chairmanVotes || []).find(item => item.id === payload.voteId && item.status === 'open');
     if (!vote) throw new GameRuleError(404, 'Open chairman vote not found');
     supportExistingChairmanVote(state, corp, actor, vote, events);
@@ -779,22 +1088,326 @@ function buyHouses(state, player, payload, events) {
     log(state, `${player.name} bought houses/hotels for $${totalCost}`);
 }
 
-function trade(state, actor, payload, events) {
+function getTradeTerms(state, payload) {
     const player1 = state.players.find(p => p.userId === payload.player1Id);
     const player2 = state.players.find(p => p.userId === payload.player2Id);
     if (!player1 || !player2 || player1.userId === player2.userId) throw new GameRuleError(400, 'Invalid trade players');
-    if (![player1.userId, player2.userId].includes(actor.userId)) throw new GameRuleError(403, 'Trade must involve acting player');
     const player1Cash = nonNegativeNumber(payload.player1Cash || 0, 'player1Cash');
     const player2Cash = nonNegativeNumber(payload.player2Cash || 0, 'player2Cash');
+    const player1AssetIds = uniqueIds(payload.player1AssetIds || []);
+    const player2AssetIds = uniqueIds(payload.player2AssetIds || []);
+    if (player1Cash <= 0 && player2Cash <= 0 && player1AssetIds.length === 0 && player2AssetIds.length === 0) {
+        throw new GameRuleError(400, 'Trade must include cash or property');
+    }
+    return { player1, player2, player1Cash, player2Cash, player1AssetIds, player2AssetIds };
+}
+
+function validateTradeTerms(state, terms) {
+    const { player1, player2, player1Cash, player2Cash, player1AssetIds, player2AssetIds } = terms;
     if (player1.cash < player1Cash || player2.cash < player2Cash) throw new GameRuleError(400, 'Insufficient trade cash');
+    validatePropertyTransferList(state, player1, player1AssetIds);
+    validatePropertyTransferList(state, player2, player2AssetIds);
+}
+
+function applyTradeTransfer(state, terms) {
+    const { player1, player2, player1Cash, player2Cash, player1AssetIds, player2AssetIds } = terms;
     player1.cash = player1.cash - player1Cash + player2Cash;
     player2.cash = player2.cash - player2Cash + player1Cash;
     if (player1Cash > 0) recordCashFlow(state, player1.userId, player2.userId, player1Cash);
     if (player2Cash > 0) recordCashFlow(state, player2.userId, player1.userId, player2Cash);
-    transferProperties(state, player1, player2, payload.player1AssetIds || []);
-    transferProperties(state, player2, player1, payload.player2AssetIds || []);
+    transferProperties(state, player1, player2, player1AssetIds);
+    transferProperties(state, player2, player1, player2AssetIds);
+}
+
+function trade(state, actor, payload, events) {
+    const terms = getTradeTerms(state, payload);
+    const { player1, player2, player1Cash, player2Cash } = terms;
+    if (![player1.userId, player2.userId].includes(actor.userId)) throw new GameRuleError(403, 'Trade must involve acting player');
+    validateTradeTerms(state, terms);
+    applyTradeTransfer(state, terms);
     events.push(makeEvent(actor, 'transaction', { player1: player1.name, player2: player2.name, player1Cash, player2Cash }));
     log(state, `Transaction: ${player1.name} <-> ${player2.name}`);
+}
+
+function proposeTrade(state, actor, payload, events) {
+    const terms = getTradeTerms(state, payload);
+    const { player1, player2, player1Cash, player2Cash, player1AssetIds, player2AssetIds } = terms;
+    if (![player1.userId, player2.userId].includes(actor.userId)) throw new GameRuleError(403, 'Trade must involve acting player');
+    validateTradeTerms(state, terms);
+    const recipient = actor.userId === player1.userId ? player2 : player1;
+    const now = new Date();
+    const createdAt = now.toISOString();
+    const offer = {
+        id: `offer-${uuidv4()}`,
+        status: 'pending',
+        proposedById: actor.userId,
+        proposedByName: actor.name,
+        recipientId: recipient.userId,
+        recipientName: recipient.name,
+        player1Id: player1.userId,
+        player1Name: player1.name,
+        player2Id: player2.userId,
+        player2Name: player2.name,
+        player1Cash,
+        player2Cash,
+        player1AssetIds,
+        player2AssetIds,
+        createdAt,
+        expiresAt: tradeOfferExpiryFrom(state, now),
+    };
+    state.marketOffers.push(offer);
+    events.push(makeEvent(actor, 'trade_offer_proposed', {
+        offerId: offer.id,
+        proposer: actor.name,
+        recipient: recipient.name,
+        player1: player1.name,
+        player2: player2.name,
+        player1Cash,
+        player2Cash,
+        player1Assets: player1AssetIds.length,
+        player2Assets: player2AssetIds.length,
+        expiresAt: offer.expiresAt,
+    }));
+    log(state, `${actor.name} proposed a trade with ${recipient.name}`);
+}
+
+function acceptTrade(state, actor, payload, events) {
+    const offer = findPendingTradeOffer(state, payload.offerId);
+    if (![offer.player1Id, offer.player2Id].includes(actor.userId)) throw new GameRuleError(403, 'Trade must involve acting player');
+    if (offer.proposedById === actor.userId) throw new GameRuleError(403, 'Trade proposer cannot accept their own offer');
+    const terms = getTradeTerms(state, offer);
+    validateTradeTerms(state, terms);
+    applyTradeTransfer(state, terms);
+    offer.status = 'accepted';
+    offer.acceptedById = actor.userId;
+    offer.acceptedByName = actor.name;
+    offer.resolvedAt = new Date().toISOString();
+    events.push(makeEvent(actor, 'trade_offer_accepted', {
+        offerId: offer.id,
+        proposer: offer.proposedByName,
+        accepter: actor.name,
+        player1: offer.player1Name,
+        player2: offer.player2Name,
+        player1Cash: offer.player1Cash,
+        player2Cash: offer.player2Cash,
+        player1Assets: offer.player1AssetIds.length,
+        player2Assets: offer.player2AssetIds.length,
+    }));
+    log(state, `${actor.name} accepted ${offer.proposedByName}'s trade offer`);
+}
+
+function cancelTrade(state, actor, payload, events) {
+    const offer = findPendingTradeOffer(state, payload.offerId);
+    if (![offer.player1Id, offer.player2Id].includes(actor.userId)) throw new GameRuleError(403, 'Trade must involve acting player');
+    offer.status = offer.proposedById === actor.userId ? 'canceled' : 'declined';
+    offer.resolvedAt = new Date().toISOString();
+    offer.resolvedById = actor.userId;
+    offer.resolvedByName = actor.name;
+    events.push(makeEvent(actor, 'trade_offer_canceled', {
+        offerId: offer.id,
+        proposer: offer.proposedByName,
+        actor: actor.name,
+        status: offer.status,
+    }));
+    log(state, `${actor.name} ${offer.status === 'declined' ? 'declined' : 'canceled'} a trade offer`);
+}
+
+function hostCancelTradeOffer(state, actor, payload, events) {
+    const offer = findPendingTradeOffer(state, payload.offerId);
+    offer.status = 'canceled';
+    offer.cancelReason = 'host';
+    offer.resolvedAt = new Date().toISOString();
+    offer.resolvedById = actor.userId;
+    offer.resolvedByName = actor.name;
+    events.push(makeEvent(actor, 'trade_offer_canceled', {
+        offerId: offer.id,
+        proposer: offer.proposedByName,
+        actor: actor.name,
+        status: offer.status,
+        reason: 'host',
+    }));
+    log(state, `${actor.name} canceled a trade offer as host`);
+}
+
+function findPendingTradeOffer(state, offerId) {
+    const offer = (state.marketOffers || []).find(item => item.id === offerId && item.status === 'pending');
+    if (!offer) throw new GameRuleError(404, 'Pending trade offer not found');
+    return offer;
+}
+
+function expirePendingTradeOffersIfNeeded(state, actor, events) {
+    const expiredOfferIds = new Set();
+    const now = new Date().toISOString();
+    (state.marketOffers || []).forEach(offer => {
+        if (offer.status !== 'pending' || !isTradeOfferExpired(offer)) return;
+        offer.status = 'expired';
+        offer.cancelReason = 'timeout';
+        offer.resolvedAt = now;
+        offer.resolvedById = actor.userId;
+        offer.resolvedByName = actor.name;
+        expiredOfferIds.add(offer.id);
+        events.push(makeEvent(actor, 'trade_offer_expired', {
+            offerId: offer.id,
+            proposer: offer.proposedByName,
+            recipient: offer.recipientName,
+            actor: actor.name,
+            reason: 'timeout',
+        }));
+        log(state, `Trade offer from ${offer.proposedByName} to ${offer.recipientName} expired`);
+    });
+    return expiredOfferIds;
+}
+
+function isTradeOfferExpired(offer) {
+    if (!offer?.expiresAt) return false;
+    const expiresAt = new Date(offer.expiresAt).getTime();
+    return Number.isFinite(expiresAt) && expiresAt <= Date.now();
+}
+
+function cancelPendingTradeOffersForPlayer(state, player, events) {
+    const now = new Date().toISOString();
+    (state.marketOffers || []).forEach(offer => {
+        if (offer.status !== 'pending') return;
+        if (![offer.player1Id, offer.player2Id].includes(player.userId)) return;
+        offer.status = 'canceled';
+        offer.cancelReason = 'bankruptcy';
+        offer.resolvedAt = now;
+        offer.resolvedById = player.userId;
+        offer.resolvedByName = player.name;
+        events.push(makeEvent(player, 'trade_offer_canceled', {
+            offerId: offer.id,
+            proposer: offer.proposedByName,
+            actor: player.name,
+            status: offer.status,
+            reason: 'bankruptcy',
+        }));
+    });
+}
+
+function liquidateBankruptPlayer(state, player, events, claim = null) {
+    const creditor = resolveBankruptcyCreditor(state, claim);
+    const releasedProperties = [];
+    state.properties.forEach(prop => {
+        if (prop.ownerId !== player.userId) return;
+        releasedProperties.push({ id: prop.id, name: prop.name });
+        prop.houses = 0;
+        if (creditor?.type === 'player') {
+            prop.ownerId = creditor.id;
+            prop.ownerName = creditor.name;
+        } else if (creditor?.type === 'corporation') {
+            prop.ownerId = creditor.id;
+            prop.ownerName = creditor.name;
+            addCorporationAsset(creditor.entity, prop);
+        } else {
+            prop.ownerId = null;
+            prop.ownerName = null;
+        }
+    });
+
+    const returnedSharePositions = [];
+    const transferredSharePositions = [];
+    state.corporations.forEach(corp => {
+        const beforeShares = Number(corp.availableShares || 0);
+        const holding = (corp.shareholders || []).find(shareholder => shareholder.userId === player.userId);
+        if (holding) {
+            const shares = Number(holding.shares || 0);
+            corp.shareholders = (corp.shareholders || []).filter(shareholder => shareholder.userId !== player.userId);
+            if (creditor?.type === 'player') {
+                const recipientHolding = corp.shareholders.find(shareholder => shareholder.userId === creditor.id);
+                if (recipientHolding) {
+                    recipientHolding.shares = Number(recipientHolding.shares || 0) + shares;
+                } else {
+                    corp.shareholders.push({ userId: creditor.id, name: creditor.name, shares });
+                }
+                transferredSharePositions.push({ ticker: corp.ticker, shares, to: creditor.name });
+            } else {
+                corp.availableShares = Math.min(Number(corp.totalShares || 0), beforeShares + shares);
+                returnedSharePositions.push({ ticker: corp.ticker, shares });
+            }
+        }
+        corp.chairmanVotes = (corp.chairmanVotes || []).map(vote => {
+            if (vote.status !== 'open') return vote;
+            const supporters = (vote.supporters || []).filter(supporter => supporter.userId !== player.userId);
+            if (vote.createdBy === player.userId || vote.candidateUserId === player.userId || supporters.length !== (vote.supporters || []).length) {
+                return {
+                    ...vote,
+                    supporters,
+                    status: 'closed',
+                    closedAt: new Date().toISOString(),
+                    closeReason: 'bankruptcy',
+                };
+            }
+            return vote;
+        });
+        if (corp.chairmanId === player.userId) {
+            const replacement = chooseReplacementChairman(state, corp, player.userId);
+            if (replacement) {
+                setChairman(corp, replacement);
+                events.push(makeEvent(player, 'chairman_changed', {
+                    ticker: corp.ticker,
+                    chairman: replacement.name,
+                    method: 'bankruptcy',
+                }));
+                log(state, `${corp.ticker} chairman changed to ${replacement.name} after ${player.name} went bankrupt.`);
+            } else {
+                corp.chairmanId = null;
+                corp.chairmanName = null;
+                events.push(makeEvent(player, 'chairman_vacated', {
+                    ticker: corp.ticker,
+                    formerChairman: player.name,
+                    reason: 'bankruptcy',
+                }));
+                log(state, `${corp.ticker} chairman seat is vacant after ${player.name} went bankrupt.`);
+            }
+        }
+    });
+
+    player.debts = [];
+    if (releasedProperties.length > 0 || returnedSharePositions.length > 0 || transferredSharePositions.length > 0) {
+        const assetDestinationName = creditor ? creditor.name : 'the Bank';
+        events.push(makeEvent(player, 'bankruptcy_liquidation', {
+            player: player.name,
+            creditor: creditor ? creditor.name : null,
+            reason: claim ? claim.reason : null,
+            assetDestinationName,
+            assetDestinationType: creditor ? creditor.type : 'bank',
+            releasedProperties,
+            returnedSharePositions,
+            transferredSharePositions,
+        }));
+        const propertyText = releasedProperties.length
+            ? `${releasedProperties.length} propert${releasedProperties.length === 1 ? 'y' : 'ies'} ${creditor ? `transferred to ${creditor.name}` : 'returned to the bank'}`
+            : 'no direct properties';
+        const returnedShares = returnedSharePositions.reduce((sum, item) => sum + item.shares, 0);
+        const transferredShares = transferredSharePositions.reduce((sum, item) => sum + item.shares, 0);
+        const shareText = returnedShares || transferredShares
+            ? `${returnedShares} share(s) returned, ${transferredShares} share(s) transferred`
+            : 'no shares returned';
+        log(state, `${player.name} bankruptcy liquidation: ${propertyText}, ${shareText}.`);
+    }
+}
+
+function addCorporationAsset(corp, prop) {
+    corp.assets = Array.isArray(corp.assets) ? corp.assets : [];
+    if (corp.assets.some(asset => asset.id === prop.id)) return;
+    corp.assets.push({
+        id: prop.id,
+        name: prop.name,
+        value: prop.price,
+        color: prop.color,
+    });
+}
+
+function chooseReplacementChairman(state, corp, bankruptUserId) {
+    const activePlayersById = new Map(state.players
+        .filter(candidate => !candidate.bankrupt && candidate.userId !== bankruptUserId)
+        .map(candidate => [candidate.userId, candidate]));
+    const shareholder = (corp.shareholders || [])
+        .filter(holder => activePlayersById.has(holder.userId) && Number(holder.shares || 0) > 0)
+        .sort((a, b) => Number(b.shares || 0) - Number(a.shares || 0))[0];
+    if (shareholder) return activePlayersById.get(shareholder.userId);
+    if (corp.founderId && activePlayersById.has(corp.founderId)) return activePlayersById.get(corp.founderId);
+    return null;
 }
 
 function manualPayment(state, actor, payload, events) {
@@ -812,6 +1425,8 @@ function manualPayment(state, actor, payload, events) {
 }
 
 function endTurn(state, player, events) {
+    if (!player.diceRolled) throw new GameRuleError(400, 'Roll before ending turn');
+
     let totalInterest = 0;
     player.debts.forEach(debt => {
         const interest = debt.principal * (debt.interestRate / 100);
@@ -838,11 +1453,27 @@ function endTurn(state, player, events) {
             events.push(makeEvent(player, 'interest_accrual', { player: `[${corp.ticker}]`, interestCharged: corpInterest }));
             log(state, `${corp.ticker} was charged $${corpInterest.toFixed(2)} in interest.`);
         }
+        if (Number(corp.cash || 0) < 0) {
+            resolveCorporationInsolvency(state, corp, player, events, {
+                reason: 'interest',
+                interestCharged: corpInterest,
+            });
+        }
     });
-    if (player.cash < 0 && !player.bankrupt) {
+    const bankruptcyClaim = settleBankruptcyClaimAtTurnEnd(state, player, events);
+    if ((player.cash < 0 || bankruptcyClaim) && !player.bankrupt) {
         player.bankrupt = true;
-        events.push(makeEvent(player, 'bankruptcy', { player: player.name }));
+        cancelPendingTradeOffersForPlayer(state, player, events);
+        liquidateBankruptPlayer(state, player, events, bankruptcyClaim);
+        clearBankruptcyClaim(state, player.userId);
+        events.push(makeEvent(player, 'bankruptcy', {
+            player: player.name,
+            creditor: bankruptcyClaim ? bankruptcyClaim.creditorName : null,
+            reason: bankruptcyClaim ? bankruptcyClaim.reason : null,
+        }));
         log(state, `${player.name} has gone BANKRUPT!`);
+    } else if (!bankruptcyClaim && player.cash >= 0) {
+        clearBankruptcyClaim(state, player.userId);
     }
     player.diceRolled = false;
     player.doubleCount = 0;
@@ -867,7 +1498,77 @@ function endTurn(state, player, events) {
     log(state, `${player.name} ended their turn. It's now ${state.players[nextIndex].name}'s turn.`);
 }
 
+function resolveCorporationInsolvency(state, corp, actor, events, details = {}) {
+    if (!corp || corp.insolvent) return;
+    const releasedProperties = [];
+    state.properties.forEach(prop => {
+        if (prop.ownerId !== corp.id) return;
+        releasedProperties.push({ id: prop.id, name: prop.name });
+        prop.ownerId = null;
+        prop.ownerName = null;
+        prop.houses = 0;
+    });
+
+    const wipedSharePositions = (corp.shareholders || [])
+        .map(shareholder => ({
+            userId: shareholder.userId,
+            name: shareholder.name,
+            shares: Number(shareholder.shares || 0),
+        }))
+        .filter(shareholder => shareholder.shares > 0);
+    const clearedDebts = (corp.debts || []).map(debt => ({
+        id: debt.id,
+        principal: Number(debt.principal || 0),
+        interestRate: Number(debt.interestRate || 0),
+    }));
+    const openVotes = (corp.chairmanVotes || []).filter(vote => vote.status === 'open');
+    const cashBeforeReset = Number(corp.cash || 0);
+
+    corp.status = 'insolvent';
+    corp.insolvent = true;
+    corp.cash = 0;
+    corp.assets = [];
+    corp.debts = [];
+    corp.shareholders = [];
+    corp.availableShares = 0;
+    corp.pricePerShare = 0;
+    corp.chairmanId = null;
+    corp.chairmanName = null;
+    corp.chairmanVotes = (corp.chairmanVotes || []).map(vote => {
+        if (vote.status !== 'open') return vote;
+        return {
+            ...vote,
+            status: 'closed',
+            closedAt: new Date().toISOString(),
+            closeReason: 'corporation_insolvent',
+        };
+    });
+
+    events.push(makeEvent(actor, 'corporation_insolvent', {
+        ticker: corp.ticker,
+        corporation: corp.name,
+        reason: details.reason || 'insolvency',
+        interestCharged: Number(details.interestCharged || 0),
+        cashBeforeReset,
+        releasedProperties,
+        wipedSharePositions,
+        clearedDebts,
+        closedVotes: openVotes.length,
+    }));
+    log(state, `${corp.ticker} became insolvent: ${releasedProperties.length} propert${releasedProperties.length === 1 ? 'y' : 'ies'} returned to the Bank, shares wiped, and debts cleared.`);
+}
+
 function finishGame(state, reason, events) {
+    if (state.paused && state.pause) {
+        state.pauseHistory.push({
+            ...state.pause,
+            closedAt: new Date().toISOString(),
+            closeReason: 'game_ended',
+        });
+        state.pauseHistory = state.pauseHistory.slice(-20);
+    }
+    state.paused = false;
+    state.pause = null;
     state.ended = true;
     state.standings = state.players.map(player => ({
         userId: player.userId,
@@ -878,6 +1579,44 @@ function finishGame(state, reason, events) {
     })).sort((a, b) => b.netWorth - a.netWorth);
     events.push(makeEvent(state.players[state.currentPlayerIndex] || state.players[0], 'game_ended', { reason, standings: state.standings }));
     log(state, `Game over - ${reason}`);
+}
+
+function pauseGame(state, actor, payload, events) {
+    if (state.paused) throw new GameRuleError(400, 'Game is already paused');
+    const reason = cleanText(payload.reason, 'Host paused the game');
+    const pausedAt = new Date().toISOString();
+    state.paused = true;
+    state.pause = {
+        reason,
+        pausedAt,
+        pausedById: actor.userId,
+        pausedByName: actor.name,
+    };
+    events.push(makeEvent(actor, 'game_paused', {
+        actor: actor.name,
+        reason,
+        pausedAt,
+    }));
+    log(state, `${actor.name} paused the game: ${reason}`);
+}
+
+function resumeGame(state, actor, events) {
+    if (!state.paused) throw new GameRuleError(400, 'Game is not paused');
+    const resumedAt = new Date().toISOString();
+    state.pauseHistory.push({
+        ...(state.pause || {}),
+        resumedAt,
+        resumedById: actor.userId,
+        resumedByName: actor.name,
+    });
+    state.pauseHistory = state.pauseHistory.slice(-20);
+    state.paused = false;
+    state.pause = null;
+    events.push(makeEvent(actor, 'game_resumed', {
+        actor: actor.name,
+        resumedAt,
+    }));
+    log(state, `${actor.name} resumed the game`);
 }
 
 function calculateRent(state, propertyId, diceTotal) {
@@ -895,6 +1634,15 @@ function calculateRent(state, propertyId, diceTotal) {
     const colorGroup = state.properties.filter(p => p.color === property.color);
     const monopoly = colorGroup.length > 0 && colorGroup.every(p => p.ownerId === property.ownerId);
     return monopoly ? property.rent[0] * 2 : property.rent[0];
+}
+
+function calculateRentForLanding(state, propertyId, diceTotal, options = {}) {
+    const property = state.properties.find(p => p.id === propertyId);
+    if (!property || !property.ownerId) return 0;
+    if (property.color === 'Utility' && options.utilityMultiplier) {
+        return diceTotal * Number(options.utilityMultiplier || 0);
+    }
+    return calculateRent(state, propertyId, diceTotal) * Number(options.rentMultiplier || 1);
 }
 
 function calculateNetWorth(state, playerId) {
@@ -943,6 +1691,139 @@ function recordCashFlow(state, fromEntityId, toEntityId, amount) {
     }
 }
 
+function getBankruptcyClaim(state, debtorId) {
+    return state.bankruptcyClaims && state.bankruptcyClaims[debtorId] ? state.bankruptcyClaims[debtorId] : null;
+}
+
+function clearBankruptcyClaim(state, debtorId) {
+    if (!state.bankruptcyClaims) state.bankruptcyClaims = {};
+    delete state.bankruptcyClaims[debtorId];
+}
+
+function setBankruptcyClaim(state, debtor, claim) {
+    const unpaidAmount = Number(claim.unpaidAmount || 0);
+    if (unpaidAmount <= 0) {
+        clearBankruptcyClaim(state, debtor.userId);
+        return null;
+    }
+    state.bankruptcyClaims = state.bankruptcyClaims && typeof state.bankruptcyClaims === 'object' ? state.bankruptcyClaims : {};
+    state.bankruptcyClaims[debtor.userId] = {
+        debtorId: debtor.userId,
+        debtorName: debtor.name,
+        creditorId: claim.creditorId || null,
+        creditorName: claim.creditorName || 'the Bank',
+        creditorType: claim.creditorType || 'bank',
+        reason: claim.reason || 'Unpaid obligation',
+        propertyId: claim.propertyId || null,
+        propertyName: claim.propertyName || null,
+        amountOwed: Number(claim.amountOwed || 0),
+        paidAmount: Number(claim.paidAmount || 0),
+        unpaidAmount,
+        createdAt: claim.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+    };
+    return state.bankruptcyClaims[debtor.userId];
+}
+
+function resolveBankruptcyCreditor(state, claim) {
+    if (!claim || !claim.creditorId) return null;
+    if (claim.creditorType === 'player') {
+        const player = state.players.find(candidate => candidate.userId === claim.creditorId && !candidate.bankrupt);
+        return player ? { type: 'player', id: player.userId, name: player.name, entity: player } : null;
+    }
+    if (claim.creditorType === 'corporation') {
+        const corporation = state.corporations.find(candidate => candidate.id === claim.creditorId && !candidate.insolvent);
+        return corporation ? { type: 'corporation', id: corporation.id, name: `[${corporation.ticker}]`, entity: corporation } : null;
+    }
+    return null;
+}
+
+function payCreditorAvailableCash(state, debtor, creditor, amountOwed, reason, events, extra = {}) {
+    const owed = Number(amountOwed || 0);
+    if (owed <= 0) return;
+    const availableCash = Math.max(Number(debtor.cash || 0), 0);
+    const paidAmount = Math.min(availableCash, owed);
+    const unpaidAmount = owed - paidAmount;
+    debtor.cash -= paidAmount;
+    if (creditor.type === 'player') {
+        creditor.entity.cash += paidAmount;
+    } else {
+        creditor.entity.cash = Number(creditor.entity.cash || 0) + paidAmount;
+    }
+    recordCashFlow(state, debtor.userId, creditor.id, paidAmount);
+
+    const eventData = {
+        from: debtor.name,
+        to: creditor.name,
+        amount: paidAmount,
+        amountOwed: owed,
+        unpaidAmount,
+        reason,
+        ...extra,
+    };
+    events.push(makeEvent(debtor, 'forced_payment', eventData));
+
+    if (unpaidAmount > 0) {
+        setBankruptcyClaim(state, debtor, {
+            creditorId: creditor.id,
+            creditorName: creditor.name,
+            creditorType: creditor.type,
+            reason,
+            amountOwed: owed,
+            paidAmount,
+            unpaidAmount,
+            propertyId: extra.propertyId,
+            propertyName: extra.propertyName,
+        });
+        log(state, `${debtor.name} owed $${owed.toFixed(2)} to ${creditor.name} for ${reason}, paid $${paidAmount.toFixed(2)}, and has $${unpaidAmount.toFixed(2)} unpaid.`);
+    } else {
+        log(state, `${debtor.name} paid $${owed.toFixed(2)} to ${creditor.name} for ${reason}`);
+    }
+}
+
+function settleBankruptcyClaimAtTurnEnd(state, player, events) {
+    const claim = getBankruptcyClaim(state, player.userId);
+    if (!claim) return null;
+    const creditor = resolveBankruptcyCreditor(state, claim);
+    if (!creditor) return claim;
+
+    const payment = Math.min(Math.max(Number(player.cash || 0), 0), Number(claim.unpaidAmount || 0));
+    if (payment > 0) {
+        player.cash -= payment;
+        if (creditor.type === 'player') {
+            creditor.entity.cash += payment;
+        } else {
+            creditor.entity.cash = Number(creditor.entity.cash || 0) + payment;
+        }
+        recordCashFlow(state, player.userId, creditor.id, payment);
+        claim.paidAmount = Number(claim.paidAmount || 0) + payment;
+        claim.unpaidAmount = Math.max(Number(claim.unpaidAmount || 0) - payment, 0);
+        claim.updatedAt = new Date().toISOString();
+        events.push(makeEvent(player, 'bankruptcy_claim_payment', {
+            player: player.name,
+            creditor: creditor.name,
+            amount: payment,
+            reason: claim.reason,
+            unpaidAmount: claim.unpaidAmount,
+        }));
+        log(state, `${player.name} paid $${payment.toFixed(2)} toward ${claim.reason} owed to ${creditor.name}.`);
+    }
+
+    if (Number(claim.unpaidAmount || 0) <= 0) {
+        clearBankruptcyClaim(state, player.userId);
+        events.push(makeEvent(player, 'bankruptcy_claim_settled', {
+            player: player.name,
+            creditor: creditor.name,
+            reason: claim.reason,
+        }));
+        log(state, `${player.name} settled the unpaid ${claim.reason} claim.`);
+        return null;
+    }
+
+    setBankruptcyClaim(state, player, claim);
+    return getBankruptcyClaim(state, player.userId);
+}
+
 function validateStateInvariants(state) {
     if (!Array.isArray(state.players) || state.players.length === 0) return 'Game must have players';
     if (state.currentPlayerIndex < 0 || state.currentPlayerIndex >= state.players.length) return 'Invalid current player index';
@@ -963,6 +1844,12 @@ function validateStateInvariants(state) {
         const shares = (corp.shareholders || []).reduce((sum, s) => sum + Number(s.shares || 0), 0);
         if (shares > corp.totalShares) return 'Corporation shareholders exceed total shares';
         if (corp.availableShares < 0 || corp.availableShares > corp.totalShares) return 'Invalid available shares';
+    }
+    if (state.auction?.status === 'open') {
+        const prop = state.properties.find(item => item.id === state.auction.propertyId);
+        if (!prop || prop.ownerId) return 'Invalid open auction property';
+        if (state.auction.highBidderId && !userIds.has(state.auction.highBidderId)) return 'Invalid open auction bidder';
+        if (Number(state.auction.currentBid || 0) < 0) return 'Invalid open auction bid';
     }
     return null;
 }
@@ -988,6 +1875,8 @@ function syncDerivedPortfolios(state) {
                     sharesOwned: holder ? holder.shares : 0,
                     totalShares: corp.totalShares,
                     pricePerShare: corp.pricePerShare,
+                    status: corp.status || 'active',
+                    insolvent: !!corp.insolvent,
                     role: isChairman ? 'Chairman' : (isFounder ? 'Founder' : 'Shareholder'),
                 } : null;
             })
@@ -1002,6 +1891,82 @@ function transferProperties(state, from, to, ids) {
         prop.ownerId = to.userId;
         prop.ownerName = to.name;
     });
+}
+
+function validatePropertyTransferList(state, from, ids) {
+    ids.forEach(id => {
+        const prop = state.properties.find(p => p.id === id);
+        if (!prop || prop.ownerId !== from.userId) throw new GameRuleError(400, 'Can only transfer owned property');
+    });
+}
+
+function uniqueIds(ids) {
+    if (!Array.isArray(ids)) return [];
+    const seen = new Set();
+    return ids
+        .map(id => String(id || '').trim())
+        .filter(id => {
+            if (!id || seen.has(id)) return false;
+            seen.add(id);
+            return true;
+        });
+}
+
+function normalizeAuction(auction) {
+    if (!auction || typeof auction !== 'object') return null;
+    return {
+        ...auction,
+        status: auction.status || 'open',
+        propertyId: auction.propertyId || null,
+        propertyName: auction.propertyName || '',
+        currentBid: Number(auction.currentBid || auction.finalBid || 0),
+        highBidderId: auction.highBidderId || auction.winnerId || null,
+        highBidderName: auction.highBidderName || auction.winnerName || null,
+        passedPlayerIds: Array.isArray(auction.passedPlayerIds) ? auction.passedPlayerIds : [],
+    };
+}
+
+function normalizePauseState(pause) {
+    if (!pause || typeof pause !== 'object') {
+        return {
+            reason: 'Host paused the game',
+            pausedAt: new Date().toISOString(),
+            pausedById: null,
+            pausedByName: 'Host',
+        };
+    }
+    return {
+        reason: cleanText(pause.reason, 'Host paused the game'),
+        pausedAt: normalizeDateString(pause.pausedAt),
+        pausedById: pause.pausedById || null,
+        pausedByName: pause.pausedByName || 'Host',
+    };
+}
+
+function normalizeBankruptcyClaims(claims) {
+    if (!claims || typeof claims !== 'object' || Array.isArray(claims)) return {};
+    return Object.entries(claims).reduce((normalized, [debtorId, claim]) => {
+        if (!claim || typeof claim !== 'object') return normalized;
+        const amountOwed = Number(claim.amountOwed || 0);
+        const paidAmount = Number(claim.paidAmount || 0);
+        const unpaidAmount = Number(claim.unpaidAmount ?? Math.max(amountOwed - paidAmount, 0));
+        if (!debtorId || unpaidAmount <= 0) return normalized;
+        normalized[debtorId] = {
+            ...claim,
+            debtorId: claim.debtorId || debtorId,
+            creditorId: claim.creditorId || null,
+            creditorName: claim.creditorName || 'the Bank',
+            creditorType: claim.creditorType || 'bank',
+            amountOwed,
+            paidAmount,
+            unpaidAmount,
+        };
+        return normalized;
+    }, {});
+}
+
+function requireHost(options, actorUserId) {
+    if (!options.hostId || options.hostId !== actorUserId) throw new GameRuleError(403, 'Not the host');
 }
 
 function ownsCompleteGroup(state, userId, color) {
@@ -1063,6 +2028,22 @@ function positiveInt(value, name) {
     const number = Number(value);
     if (!Number.isInteger(number) || number <= 0) throw new GameRuleError(400, `${name} must be a positive integer`);
     return number;
+}
+
+function cleanText(value, fallback, maxLength = 160) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text) return fallback;
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength - 3)}...`;
+}
+
+function normalizeDate(value) {
+    const date = value ? new Date(value) : new Date();
+    return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function normalizeDateString(value) {
+    return normalizeDate(value).toISOString();
 }
 
 function structuredCloneSafe(value) {

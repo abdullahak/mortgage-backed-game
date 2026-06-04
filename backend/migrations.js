@@ -92,6 +92,25 @@ function migrate(db) {
                 ON game_events (game_id, created_at DESC);
         `);
     });
+
+    apply(db, '003_operational_hot_path_indexes', () => {
+        db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_room_members_room_joined
+                ON room_members (room_id, joined_at ASC);
+            CREATE INDEX IF NOT EXISTS idx_room_members_user_joined
+                ON room_members (user_id, joined_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_games_room
+                ON games (room_id);
+            CREATE INDEX IF NOT EXISTS idx_game_actions_game_created
+                ON game_actions (game_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_game_actions_actor_created
+                ON game_actions (actor_user_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_otps_email_used_expires
+                ON otps (email, used, expires_at);
+            CREATE INDEX IF NOT EXISTS idx_rooms_status_created
+                ON rooms (status, created_at DESC);
+        `);
+    });
 }
 
 function apply(db, id, fn) {

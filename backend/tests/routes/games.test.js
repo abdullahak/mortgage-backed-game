@@ -39,6 +39,12 @@ function minimalGameState() {
     };
 }
 
+function rolledGameState() {
+    const state = minimalGameState();
+    state.players[0].diceRolled = true;
+    return state;
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/games
 // ---------------------------------------------------------------------------
@@ -251,7 +257,7 @@ describe('POST /api/games/:id/actions', () => {
         const res = await request(app)
             .post('/api/games')
             .set('Authorization', `Bearer ${user1.token}`)
-            .send({ room_id: room.id, game_state: minimalGameState() });
+            .send({ room_id: room.id, game_state: rolledGameState() });
         gameId = res.body.id;
     });
 
@@ -268,6 +274,66 @@ describe('POST /api/games/:id/actions', () => {
         expect(res.status).toBe(200);
         expect(res.body.game.state_version).toBe(1);
         expect(res.body.game.game_state.currentPlayerIndex).toBe(1);
+    });
+
+    test('400 rejects end_turn before current player rolls', async () => {
+        const { createRoomFixture } = require('../helpers/fixtures');
+        const unrolledRoom = createRoomFixture(db, user1.id, { inviteCode: 'UNROLL', maxPlayers: 4 });
+        const unrolledGame = await request(app)
+            .post('/api/games')
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send({ room_id: unrolledRoom.id, game_state: minimalGameState() });
+
+        const res = await request(app)
+            .post(`/api/games/${unrolledGame.body.id}/actions`)
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send(actionPayload('end_turn'));
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe('Roll before ending turn');
+    });
+
+    test('host can pause and resume game actions, and normal actions are blocked while paused', async () => {
+        const pause = await request(app)
+            .post(`/api/games/${gameId}/actions`)
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send(actionPayload('host_pause_game', { reason: 'Player reconnecting' }));
+
+        expect(pause.status).toBe(200);
+        expect(pause.body.game.game_state.paused).toBe(true);
+        expect(pause.body.game.game_state.pause.reason).toBe('Player reconnecting');
+        expect(pause.body.events.some(event => event.type === 'game_paused')).toBe(true);
+
+        const blocked = await request(app)
+            .post(`/api/games/${gameId}/actions`)
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send(actionPayload('end_turn', {}, 1));
+
+        expect(blocked.status).toBe(400);
+        expect(blocked.body.error).toBe('Game is paused');
+
+        const resume = await request(app)
+            .post(`/api/games/${gameId}/actions`)
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send(actionPayload('host_resume_game', {}, 1));
+
+        expect(resume.status).toBe(200);
+        expect(resume.body.game.game_state.paused).toBe(false);
+        expect(resume.body.game.game_state.pause).toBeNull();
+        expect(resume.body.game.game_state.pauseHistory[0].reason).toBe('Player reconnecting');
+        expect(resume.body.events.some(event => event.type === 'game_resumed')).toBe(true);
+    });
+
+    test('non-host cannot pause the game', async () => {
+        addRoomMember(room.id, user2.id, 'Bob');
+
+        const res = await request(app)
+            .post(`/api/games/${gameId}/actions`)
+            .set('Authorization', `Bearer ${user2.token}`)
+            .send(actionPayload('host_pause_game'));
+
+        expect(res.status).toBe(403);
+        expect(res.body.error).toBe('Not the host');
     });
 
     test('state persisted after action', async () => {

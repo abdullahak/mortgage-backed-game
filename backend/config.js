@@ -36,6 +36,9 @@ function getConfig() {
         .split(',')
         .map(origin => origin.trim())
         .filter(Boolean);
+    const rateLimitEnabled = process.env.RATE_LIMIT_ENABLED
+        ? process.env.RATE_LIMIT_ENABLED !== 'false'
+        : process.env.NODE_ENV !== 'test';
 
     if (isProduction()) {
         if (!process.env.DB_PATH) throw new Error('DB_PATH is required in production');
@@ -59,9 +62,20 @@ function getConfig() {
         jwtExpiry: process.env.JWT_EXPIRY || (isProduction() ? '12h' : '30d'),
         dbPath,
         corsOrigins,
+        trustProxy: parseTrustProxy(process.env.TRUST_PROXY, isProduction()),
         allowStateRepair: process.env.ALLOW_STATE_REPAIR === 'true',
         requestBodyLimit: process.env.REQUEST_BODY_LIMIT || '256kb',
         otpLogEnabled: process.env.LOG_OTPS === 'true' && !isProduction(),
+        actionAuditLogEnabled: process.env.ACTION_AUDIT_LOG
+            ? process.env.ACTION_AUDIT_LOG !== 'false'
+            : process.env.NODE_ENV !== 'test',
+        rateLimitEnabled,
+        rateLimits: {
+            auth: buildRateLimitConfig('AUTH', rateLimitEnabled, { max: 120, windowMs: 15 * 60 * 1000 }),
+            roomCreate: buildRateLimitConfig('ROOM_CREATE', rateLimitEnabled, { max: 12, windowMs: 60 * 60 * 1000 }),
+            gameAction: buildRateLimitConfig('GAME_ACTION', rateLimitEnabled, { max: 120, windowMs: 60 * 1000 }),
+            manualEvent: buildRateLimitConfig('MANUAL_EVENT', rateLimitEnabled, { max: 30, windowMs: 60 * 1000 }),
+        },
     };
 }
 
@@ -74,6 +88,32 @@ function getCorsOptions(config) {
         },
         methods: ['GET', 'POST', 'PATCH', 'DELETE'],
     };
+}
+
+function buildRateLimitConfig(prefix, enabled, defaults) {
+    return {
+        enabled,
+        max: readPositiveInteger(`${prefix}_RATE_LIMIT_MAX`, defaults.max),
+        windowMs: readPositiveInteger(`${prefix}_RATE_LIMIT_WINDOW_MS`, defaults.windowMs),
+    };
+}
+
+function readPositiveInteger(envName, fallback) {
+    const raw = process.env[envName];
+    if (!raw) return fallback;
+    const value = Number(raw);
+    if (Number.isInteger(value) && value > 0) return value;
+    if (isProduction()) throw new Error(`${envName} must be a positive integer`);
+    return fallback;
+}
+
+function parseTrustProxy(raw, production) {
+    if (raw === undefined) return production ? 'loopback' : false;
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    const numeric = Number(raw);
+    if (Number.isInteger(numeric) && String(numeric) === raw) return numeric;
+    return raw;
 }
 
 module.exports = { getConfig, getCorsOptions, DEFAULT_DEV_SECRET };

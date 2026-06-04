@@ -2,15 +2,14 @@
 
 > *"Play Monopoly Like Wall Street — If they did it in 2008, it's fair game"*
 
-Mortgage Backed Monopoly is an extension pack for the classic Monopoly board game. It layers Wall Street-style financial mechanics on top of the base game — corporations, IPOs, mortgage-backed securities, share trading, and compound interest. The app tracks everything the cardboard can't.
+Mortgage Backed Monopoly is a browser-based multiplayer parody of Monopoly with Wall Street-style financial mechanics layered on top: corporations, IPOs, mortgage-backed securities, share trading, and compound interest. The app runs the board, dice, payments, turn order, and financial state in real time.
 
 ---
 
 ## What You Need
 
-- A standard Monopoly board game (physical)
 - 2–8 players
-- Internet access to run the app
+- Internet access and a browser
 - An account on the hosted app (or self-host — see `SETUP.md`)
 
 ---
@@ -24,13 +23,15 @@ Mortgage Backed Monopoly is an extension pack for the classic Monopoly board gam
 
 For hosting and database setup, see `SETUP.md`.
 
+For the production-readiness plan, see `documents/production-roadmap.md`.
+
 ---
 
 ## Game Overview
 
-All players start with **$1,500**. Standard Monopoly rules govern dice rolling, movement, and rent collection. The app adds the financial layer on top: corporations, debt instruments, share prices, and interest.
+All players start with **$1,500**. The app handles dice rolling, board movement, rent, taxes, cards, turn order, and bankruptcy checks. The financial layer adds corporations, debt instruments, share prices, and interest.
 
-On your turn, take your actions in the app — buy property, issue debt, run an IPO, trade — then click **End Turn** when done. The app handles the rest.
+On your turn, roll in the app, resolve the square you landed on, take any optional actions, then click **End Turn** when done.
 
 ---
 
@@ -57,7 +58,7 @@ Full rent ladders are tracked in the app.
 
 ### Buy Property
 
-Tap **Buy Property** on your turn. Choose an unowned property and confirm the price. Cash is deducted immediately and the property appears on your player card. Any price negotiation happens outside the app — just adjust the input field before confirming.
+Tap **Buy Property** after landing on an unowned property. Cash is deducted immediately and the property appears on your player card.
 
 ---
 
@@ -65,13 +66,13 @@ Tap **Buy Property** on your turn. Choose an unowned property and confirm the pr
 
 Requires owning at least one property.
 
-Tap **Create IPO** and select which properties to bundle into a corporation. Set a **ticker symbol**, **number of shares** (1–12), and **price per share**. The selected properties move out of your personal holdings into the corporation — you automatically hold all shares at founding. Other players can now buy shares on their turns.
+Tap **Create IPO** and select which properties to bundle into a corporation. Set a **ticker symbol**, **number of shares** (1–12), and **price per share**. The selected properties move out of your personal holdings into the corporation, and other players can buy available shares on their turns.
 
 ---
 
 ### Issue Debt (Mortgage-Backed Securities)
 
-Tap **Manage Debt → Issue New Debt**. Set a **loan amount** (you receive this cash immediately), an **interest rate (%)**, and optional collateral properties.
+Tap **Manage Debt → Issue New Debt**. Set a **loan amount** (you receive this cash immediately) and optional collateral properties. The current game uses the room's debt rate, shown in the modal.
 
 Interest accrues automatically every time you end your turn:
 
@@ -91,25 +92,39 @@ Tap **Manage Debt → Settle Existing Debt**. Select the debt and enter a paymen
 
 ### Buy Shares
 
-Tap **View Corporations** during your turn. Any corporation with available shares shows a **Buy** button (not visible to the founder). Enter the number of shares; cost is `shares × pricePerShare`. Cash transfers from your wallet to the founder's wallet immediately.
+Tap **Corporations** during your turn. Any corporation with available shares shows a **Buy** button (not visible to the founder). Enter the number of shares; cost is `shares × pricePerShare`. Cash transfers into the corporation treasury immediately.
+
+If corporate debt interest pushes a corporation below $0 treasury cash, the corporation becomes insolvent. Its properties return to the bank, houses/hotels are cleared, corporation debts and shareholder positions are wiped, the chairman seat closes, and no further shares/debt/governance actions are available for that corporation.
 
 ---
 
 ### Trade (Secondary Market)
 
-Open the **Market** tab. Pick two players and enter what each side offers — any combination of cash and properties. Click **Execute Transaction** and all transfers happen atomically. Trades can happen any time; coordinate verbally with the other player first.
+Open the **Market** tab. Pick two players and enter what each side offers — any combination of cash and properties. Click **Propose Transaction** to send a pending trade offer. The other involved player must accept before cash or properties move.
+
+Pending trade offers expire after the configured trade-offer timeout. Expired offers never move cash or property; the next game action clears them. The host can also cancel abandoned pending trade offers. Host cancellation does not move cash or properties.
+
+### Auctions
+
+If you land on an unowned property and do not buy it, click **Start Auction** from the purchase modal. Active players can bid or pass from the Game tab. The high bidder pays the winning bid and receives the property once every other active player has passed; if everyone passes before a bid, the property remains unowned. Auctions have a two-minute idle timeout that refreshes on bids and passes; the next game action resolves an expired auction to the high bidder, or no sale if there were no bids.
+
+The host can cancel a stuck auction. Canceling an auction does not move cash or property.
+
+### Host Pause and Cleanup
+
+The host can pause a live game from the game screen. While paused, normal player actions are blocked for everyone until the host resumes. The host can still resume, end the game, or clear stuck auctions and trade offers.
 
 ---
 
 ### Pay a Player
 
-Also in the **Market** tab under **Payment System**. Choose a sender, a recipient, and an amount. Use this for rent, fines, or any payment the base game requires.
+Also in the **Market** tab under **Payment System**. Choose a recipient and amount. Payments are sent from your player.
 
 ---
 
 ## End of Turn
 
-Click **End Turn** when done with your actions. The app will automatically:
+Click **End Turn** after rolling and resolving your square. The UI disables End Turn until you roll, and the server rejects end-turn actions from an unrolled state. The app will automatically:
 
 1. Apply interest on all your outstanding debts
 2. Check for bankruptcy (cash below $0) — bankrupt players are skipped in future turns
@@ -133,7 +148,7 @@ Highest net worth wins.
 
 ## Bankruptcy
 
-Falling below $0 cash triggers bankruptcy, checked automatically at each turn end. Bankrupt players can no longer act and their turns are skipped. Their properties and corporations remain in the game and can be acquired through trades if both parties agree outside the app.
+Falling below $0 cash or ending the turn with unpaid rent triggers final bankruptcy. Bankrupt players can no longer act, their turns are skipped, and pending trade offers involving them are canceled. If bankruptcy is caused by unpaid rent to a player, directly owned properties and player-held corporation shares transfer to that creditor with houses/hotels cleared. If rent is owed to a corporation, directly owned properties transfer to that corporation while player-held shares return to their corporations. Bank, tax, card, and interest bankruptcies return direct properties to the bank and return player-held shares to the available share pool. Corporation-owned properties remain with the corporation unless the corporation itself becomes insolvent.
 
 ---
 

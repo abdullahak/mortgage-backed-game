@@ -143,9 +143,11 @@ function renderGameState(gameState) {
 
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     const isMyTurn = currentPlayer.userId === currentUser.id;
+    const paused = !!gameState.paused;
     const landing = getLandingSummary(gameState, currentPlayer);
 
-    document.body.classList.toggle('is-my-turn', isMyTurn);
+    document.body.classList.toggle('is-my-turn', isMyTurn && !paused);
+    document.body.classList.toggle('game-paused', paused);
 
     const orderedPlayers = [
         ...gameState.players.filter(p => p.userId === currentUser.id),
@@ -155,7 +157,7 @@ function renderGameState(gameState) {
     gameContent.innerHTML = `
         <div class="game-header">
             <h2>Current Turn: ${escapeHtml(currentPlayer.name)}</h2>
-            ${isMyTurn ? '<p class="turn-indicator">It\'s your turn!</p>' : '<p class="waiting-indicator">Waiting for other players...</p>'}
+            ${paused ? '<p class="waiting-indicator">Game paused by host</p>' : (isMyTurn ? '<p class="turn-indicator">It\'s your turn!</p>' : '<p class="waiting-indicator">Waiting for other players...</p>')}
             <div class="landing-summary ${landing.canBuy ? 'can-buy' : ''}">
                 <div>
                     <span class="landing-label">${escapeHtml(landing.label)}</span>
@@ -163,14 +165,19 @@ function renderGameState(gameState) {
                 </div>
                 <p>${escapeHtml(landing.detail)}</p>
             </div>
+            ${renderCashWarning(currentPlayer, isMyTurn)}
+            ${renderPauseBanner(gameState)}
             ${renderLastCardSummary(gameState, currentPlayer)}
+            ${renderTurnChecklist(gameState, currentPlayer, landing, isMyTurn)}
         </div>
 
         <div class="players-grid">
             ${orderedPlayers.map(player => renderPlayerCard(player, player.userId === currentUser.id)).join('')}
         </div>
 
-        ${isMyTurn ? renderActionButtons() : renderNonTurnActions()}
+        ${renderAuctionPanel(gameState)}
+
+        ${paused ? renderPausedActions(gameState) : (isMyTurn ? renderActionButtons() : renderNonTurnActions())}
 
         <div class="recent-log">
             <h3>Recent Actions</h3>
@@ -186,6 +193,148 @@ function renderGameState(gameState) {
     `;
 
     updateTurnBanner();
+}
+
+function renderPauseBanner(gameState) {
+    if (!gameState?.paused) return '';
+    const pause = gameState.pause || {};
+    const pausedBy = pause.pausedByName || 'Host';
+    const reason = pause.reason || 'Host paused the game';
+    const time = pause.pausedAt ? `Paused ${formatTimeAgo(pause.pausedAt)}.` : '';
+    return `
+        <div class="pause-panel" id="pausePanel">
+            <div>
+                <span class="pause-label">Game Paused</span>
+                <strong>${escapeHtml(reason)}</strong>
+            </div>
+            <p>${escapeHtml(`${pausedBy} paused the session. ${time}`.trim())}</p>
+        </div>
+    `;
+}
+
+function renderCashWarning(currentPlayer, isMyTurn) {
+    const claim = getBankruptcyClaimForPlayer(currentPlayer?.userId);
+    if (!currentPlayer || currentPlayer.bankrupt || (Number(currentPlayer.cash || 0) >= 0 && !claim)) return '';
+    if (claim) {
+        const unpaid = Number(claim.unpaidAmount || 0).toFixed(2);
+        const creditor = claim.creditorName || 'the creditor';
+        const message = isMyTurn
+            ? `You have $${unpaid} unpaid to ${creditor}. Raise cash before ending your turn or End Turn will declare bankruptcy.`
+            : `${currentPlayer.name} has $${unpaid} unpaid to ${creditor} and must resolve it before ending the turn.`;
+        return `<div class="turn-warning danger">${escapeHtml(message)}</div>`;
+    }
+    const amount = Math.abs(Number(currentPlayer.cash || 0)).toFixed(2);
+    const message = isMyTurn
+        ? `You are $${amount} below zero. Recover before ending your turn or End Turn will declare bankruptcy.`
+        : `${currentPlayer.name} is $${amount} below zero and must recover before ending the turn.`;
+    return `<div class="turn-warning danger">${escapeHtml(message)}</div>`;
+}
+
+function getBankruptcyClaimForPlayer(playerId) {
+    if (!playerId || !currentGame?.game_state?.bankruptcyClaims) return null;
+    const claim = currentGame.game_state.bankruptcyClaims[playerId];
+    return claim && Number(claim.unpaidAmount || 0) > 0 ? claim : null;
+}
+
+function renderAuctionPanel(gameState) {
+    const auction = gameState.auction;
+    if (!auction || auction.status !== 'open') return '';
+    const property = gameState.properties.find(prop => prop.id === auction.propertyId);
+    const currentBid = Number(auction.currentBid || 0);
+    const passed = (auction.passedPlayerIds || []).includes(currentUser.id);
+    const isHighBidder = auction.highBidderId === currentUser.id;
+    const currentPlayer = gameState.players.find(player => player.userId === currentUser.id);
+    const canAct = currentPlayer && !currentPlayer.bankrupt && !passed && !isHighBidder;
+    const isHost = currentRoom && currentUser.id === currentRoom.host_id;
+    const minBid = currentBid + 1;
+    const status = auction.highBidderName
+        ? `High bid: $${currentBid.toFixed(2)} by ${auction.highBidderName}`
+        : 'No bids yet';
+    const expiryText = formatAuctionExpiry(auction.expiresAt);
+    const actionState = passed
+        ? '<p class="auction-note">You passed on this auction.</p>'
+        : (isHighBidder
+            ? '<p class="auction-note">You are the current high bidder.</p>'
+            : '');
+
+    return `
+        <div class="auction-panel" id="auctionPanel">
+            <div class="auction-header">
+                <div>
+                    <span class="auction-label">Property Auction</span>
+                    <h3>${escapeHtml(auction.propertyName || property?.name || 'Property')}</h3>
+                </div>
+                <strong>${escapeHtml(status)}</strong>
+            </div>
+            <p>${escapeHtml(auction.startedByName || 'A player')} started this auction. Resolve it before the turn can continue.</p>
+            ${expiryText ? `<p class="auction-note">${escapeHtml(expiryText)}</p>` : ''}
+            ${actionState}
+            ${canAct ? `
+                <div class="auction-actions">
+                    <input type="number" id="auctionBidAmount" min="${minBid}" step="1" value="${minBid}" aria-label="Auction bid amount">
+                    <button class="btn btn-success btn-sm" onclick="placeAuctionBid()">Bid</button>
+                    <button class="btn btn-secondary btn-sm" onclick="passAuction()">Pass</button>
+                </div>
+            ` : ''}
+            ${isHost ? `
+                <div class="auction-host-actions">
+                    <button class="btn btn-danger btn-sm" onclick="hostCancelAuction()">Cancel Auction</button>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+function formatAuctionExpiry(expiresAt) {
+    if (!expiresAt) return '';
+    const expiry = new Date(expiresAt);
+    if (Number.isNaN(expiry.getTime())) return '';
+    const seconds = Math.max(Math.ceil((expiry.getTime() - Date.now()) / 1000), 0);
+    if (seconds <= 0) return 'Auction timeout reached. The next action will resolve it.';
+    return `Timeout if idle for ${seconds}s more.`;
+}
+
+function renderTurnChecklist(gameState, currentPlayer, landing, isMyTurn) {
+    const hasRolled = !!currentPlayer.diceRolled;
+    const ended = !!gameState.ended;
+    const items = [
+        {
+            label: 'Roll',
+            state: hasRolled ? 'complete' : (isMyTurn ? 'current' : 'upcoming'),
+            detail: hasRolled ? formatDiceLabel(gameState.lastDiceRoll) : 'Waiting for dice',
+        },
+        {
+            label: 'Resolve',
+            state: !hasRolled ? 'upcoming' : (landing.canBuy ? 'current' : 'complete'),
+            detail: landing.canBuy ? 'Property available' : landing.squareName,
+        },
+        {
+            label: 'Actions',
+            state: hasRolled && !ended ? 'current' : 'upcoming',
+            detail: 'Assets, debt, market',
+        },
+        {
+            label: 'End',
+            state: ended ? 'complete' : (hasRolled && isMyTurn ? 'current' : 'upcoming'),
+            detail: 'Interest and next player',
+        },
+    ];
+
+    return `
+        <div class="turn-checklist" aria-label="Turn progress">
+            ${items.map(item => `
+                <div class="turn-step ${item.state}">
+                    <span>${escapeHtml(item.label)}</span>
+                    <strong>${escapeHtml(item.detail)}</strong>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function formatDiceLabel(dice) {
+    if (!Array.isArray(dice) || dice.length < 2) return 'Rolled';
+    return `${dice[0]} + ${dice[1]} = ${dice[0] + dice[1]}`;
 }
 
 function getLandingSummary(gameState, player) {
@@ -268,6 +417,8 @@ function renderPlayerCard(player, isCurrentUser) {
     const debtTotal = getDebtTotal(player.debts);
     const netWorth = player.cash + totalPropertyValue + corporationValue - debtTotal;
     const cashFlow = getEntityCashFlow(player.userId);
+    const bankruptBadge = player.bankrupt ? '<span class="badge badge-danger">Bankrupt</span>' : '';
+    const cardClass = player.bankrupt ? 'bankrupt' : '';
 
     const cardDetails = `
         <div class="player-stats">
@@ -307,6 +458,7 @@ function renderPlayerCard(player, isCurrentUser) {
                 ${player.corporations.map(c => `
                     <div class="corp-badge">
                         ${escapeHtml(c.ticker)} (${c.sharesOwned}/${c.totalShares} shares, ${ownershipPercent(c.sharesOwned, c.totalShares)}%)
+                        ${c.insolvent ? '<span class="badge badge-danger">Insolvent</span>' : ''}
                         ${renderCorporationAssetSummary(c.id)}
                     </div>
                 `).join('')}
@@ -327,10 +479,11 @@ function renderPlayerCard(player, isCurrentUser) {
 
     if (isCurrentUser) {
         return `
-            <div class="player-card current-user">
+            <div class="player-card current-user ${cardClass}">
                 <div class="player-header">
                     <h3>${escapeHtml(player.name)}</h3>
                     <span class="badge">You</span>
+                    ${bankruptBadge}
                 </div>
                 ${cardDetails}
             </div>
@@ -338,9 +491,10 @@ function renderPlayerCard(player, isCurrentUser) {
     }
 
     return `
-        <div class="player-card player-card-other collapsed" data-player-id="${player.userId}">
+        <div class="player-card player-card-other collapsed ${cardClass}" data-player-id="${player.userId}">
             <div class="player-card-summary" onclick="togglePlayerCard(this)">
-                <span class="player-name-sm">${player.name}</span>
+                <span class="player-name-sm">${escapeHtml(player.name)}</span>
+                ${bankruptBadge}
                 <span class="player-stat-sm">$${player.cash.toFixed(0)}</span>
                 <span class="player-stat-sm">NW: $${netWorth.toFixed(0)}</span>
                 <span class="player-card-chevron">▼</span>
@@ -414,18 +568,21 @@ function renderActionButtons() {
     const hasRolled = currentPlayer.diceRolled;
     const isHost = currentUser.id === currentRoom.host_id;
     const landing = getLandingSummary(gameState, currentPlayer);
+    const endTurnLabel = Number(currentPlayer.cash || 0) < 0 || getBankruptcyClaimForPlayer(currentPlayer.userId) ? 'Declare Bankruptcy' : 'End Turn';
+    const auctionOpen = gameState.auction?.status === 'open';
     const buyButton = landing.canBuy
         ? '<button class="btn btn-success btn-sm action-btn-buy" onclick="openBuyPropertyModal()">Buy Property</button>'
         : `<button class="btn btn-secondary btn-sm action-btn-buy" disabled title="${escapeHtml(landing.detail)}">${escapeHtml(buyUnavailableLabel(landing))}</button>`;
     return `
         <div class="action-buttons">
             ${!hasRolled ? '<button class="btn btn-primary" style="margin-bottom:8px;width:100%;" onclick="rollDiceAndMove()">🎲 Roll Dice</button>' : ''}
-            <button class="btn btn-success action-btn-end-turn" onclick="endTurn()">End Turn</button>
+            <button class="btn btn-success action-btn-end-turn" onclick="endTurn()" ${!hasRolled || auctionOpen ? `disabled title="${auctionOpen ? 'Resolve auction before ending your turn' : 'Roll before ending your turn'}"` : ''}>${escapeHtml(auctionOpen ? 'Resolve Auction' : endTurnLabel)}</button>
             <div class="action-btn-secondary-group">
-                ${buyButton}
-                <button class="btn btn-secondary btn-sm" onclick="openIPOModal()">Create IPO</button>
-                <button class="btn btn-secondary btn-sm" onclick="openDebtModal()">Manage Debt</button>
+                ${auctionOpen ? '<button class="btn btn-secondary btn-sm action-btn-buy" disabled>Auction Open</button>' : buyButton}
+                <button class="btn btn-secondary btn-sm" onclick="openIPOModal()" ${auctionOpen ? 'disabled' : ''}>Create IPO</button>
+                <button class="btn btn-secondary btn-sm" onclick="openDebtModal()" ${auctionOpen ? 'disabled' : ''}>Manage Debt</button>
                 <button class="btn btn-secondary btn-sm" onclick="openCorporationModal()">Corporations</button>
+                ${isHost ? '<button class="btn btn-warning btn-sm" onclick="hostPauseGame()">Pause Game</button>' : ''}
                 ${isHost ? '<button class="btn btn-danger btn-sm" onclick="hostEndGame()">End Game</button>' : ''}
             </div>
         </div>
@@ -439,10 +596,26 @@ function buyUnavailableLabel(landing) {
 }
 
 function renderNonTurnActions() {
+    const isHost = currentUser.id === currentRoom.host_id;
     return `
         <div class="action-buttons">
             <div class="action-btn-secondary-group">
                 <button class="btn btn-secondary btn-sm" onclick="openCorporationModal()">Corporations</button>
+                ${isHost ? '<button class="btn btn-warning btn-sm" onclick="hostPauseGame()">Pause Game</button>' : ''}
+                ${isHost ? '<button class="btn btn-danger btn-sm" onclick="hostEndGame()">End Game</button>' : ''}
+            </div>
+        </div>
+    `;
+}
+
+function renderPausedActions() {
+    const isHost = currentUser.id === currentRoom.host_id;
+    return `
+        <div class="action-buttons paused-actions">
+            <div class="action-btn-secondary-group">
+                <button class="btn btn-secondary btn-sm" onclick="openCorporationModal()">Corporations</button>
+                ${isHost ? '<button class="btn btn-success btn-sm" onclick="hostResumeGame()">Resume Game</button>' : ''}
+                ${isHost ? '<button class="btn btn-danger btn-sm" onclick="hostEndGame()">End Game</button>' : ''}
             </div>
         </div>
     `;
@@ -458,7 +631,10 @@ function formatLogEvent(type, data) {
         case 'share_purchase':
             return `${data.buyer} bought ${data.shares} share(s) of ${data.ticker} for $${Number(data.totalCost).toFixed(2)}`;
         case 'chairman_changed':
+            if (data.method === 'bankruptcy') return `${data.ticker} chairman changed to ${data.chairman} after bankruptcy`;
             return `${data.ticker} chairman changed to ${data.chairman} by ${data.method === 'vote' ? `${data.supportedShares} supporting shares` : 'majority control'}`;
+        case 'chairman_vacated':
+            return `${data.ticker} chairman seat is vacant after ${data.formerChairman}'s bankruptcy`;
         case 'chairman_vote_proposed':
             return `${data.ticker} chairman vote proposed for ${data.candidate}`;
         case 'chairman_vote_supported':
@@ -469,14 +645,44 @@ function formatLogEvent(type, data) {
             return `${data.payer} paid $${Number(data.amount).toFixed(2)} towards their debt`;
         case 'interest_accrual':
             return `${data.player} was charged $${Number(data.interestCharged).toFixed(2)} in interest`;
+        case 'corporation_insolvent': {
+            const propertyCount = Array.isArray(data.releasedProperties) ? data.releasedProperties.length : 0;
+            const sharePositions = Array.isArray(data.wipedSharePositions) ? data.wipedSharePositions.length : 0;
+            const debtCount = Array.isArray(data.clearedDebts) ? data.clearedDebts.length : 0;
+            return `${data.ticker} became insolvent; ${propertyCount} propert${propertyCount === 1 ? 'y' : 'ies'} returned to the Bank, ${sharePositions} shareholder position(s) wiped, ${debtCount} debt(s) cleared`;
+        }
+        case 'game_paused':
+            return `${data.actor || 'Host'} paused the game${data.reason ? `: ${data.reason}` : ''}`;
+        case 'game_resumed':
+            return `${data.actor || 'Host'} resumed the game`;
         case 'forced_payment':
+            if (Number(data.unpaidAmount || 0) > 0) {
+                return `${data.from} owed $${Number(data.amountOwed || 0).toFixed(2)} to ${data.to}${data.reason ? ` for ${data.reason}` : ''}; paid $${Number(data.amount || 0).toFixed(2)}, $${Number(data.unpaidAmount || 0).toFixed(2)} unpaid`;
+            }
             return `${data.from} paid $${Number(data.amount).toFixed(2)} to ${data.to}${data.reason ? ` for ${data.reason}` : ''}`;
         case 'tax_payment':
             return `${data.from} paid $${Number(data.amount).toFixed(2)} to ${data.to}${data.reason ? ` for ${data.reason}` : ''}`;
+        case 'bankruptcy_claim_payment':
+            return `${data.player} paid $${Number(data.amount).toFixed(2)} toward ${data.reason} owed to ${data.creditor}`;
+        case 'bankruptcy_claim_settled':
+            return `${data.player} settled ${data.reason} owed to ${data.creditor}`;
         case 'bankruptcy':
-            return `${data.player} has gone BANKRUPT`;
+            return `${data.player} has gone BANKRUPT${data.creditor ? ` owing ${data.creditor}` : ''}`;
+        case 'bankruptcy_liquidation': {
+            const propertyCount = Array.isArray(data.releasedProperties) ? data.releasedProperties.length : 0;
+            const shares = (data.returnedSharePositions || []).reduce((sum, item) => sum + Number(item.shares || 0), 0);
+            const transferredShares = (data.transferredSharePositions || []).reduce((sum, item) => sum + Number(item.shares || 0), 0);
+            const destination = data.assetDestinationName || 'the Bank';
+            return `${data.player} liquidation: ${propertyCount} propert${propertyCount === 1 ? 'y' : 'ies'} to ${destination}, ${shares} share(s) returned, ${transferredShares} share(s) transferred`;
+        }
         case 'turn_end':
             return `${data.player} ended their turn — it's now ${data.nextPlayer}'s turn`;
+        case 'trade_offer_proposed':
+            return `${data.proposer} proposed a trade with ${data.recipient}`;
+        case 'trade_offer_accepted':
+            return `${data.accepter} accepted ${data.proposer}'s trade offer`;
+        case 'trade_offer_canceled':
+            return `${data.actor} ${data.status === 'declined' ? 'declined' : 'canceled'} a trade offer`;
         case 'transaction':
             return `Trade: ${data.player1} ↔ ${data.player2} ($${data.player1Cash} + ${data.player1Assets} assets ↔ $${data.player2Cash} + ${data.player2Assets} assets)`;
         case 'payment':
@@ -487,6 +693,18 @@ function formatLogEvent(type, data) {
             return `Game over — ${data.reason}`;
         case 'house_purchase':
             return `${data.player} bought houses/hotels for $${Number(data.cost).toFixed(2)}`;
+        case 'property_auction_started':
+            return `${data.startedBy} started an auction for ${data.property}`;
+        case 'property_auction_bid':
+            return `${data.bidder} bid $${Number(data.amount).toFixed(2)} for ${data.property}`;
+        case 'property_auction_passed':
+            return `${data.player} passed on ${data.property}`;
+        case 'property_auction_won':
+            return `${data.winner} won ${data.property} at auction for $${Number(data.amount).toFixed(2)}${data.reason === 'timeout' ? ' after timeout' : ''}`;
+        case 'property_auction_no_sale':
+            return `Auction ended with no sale for ${data.property}${data.reason === 'timeout' ? ' after timeout' : ''}`;
+        case 'property_auction_canceled':
+            return `${data.actor} canceled the auction for ${data.property}`;
         case 'dice_roll':
             return `${data.player} rolled ${data.die1}+${data.die2}=${data.total} — moved to ${data.square}${data.isDoubles ? ' (doubles!)' : ''}`;
         case 'card_draw':
@@ -599,6 +817,52 @@ async function confirmPurchase() {
     } catch (error) {
         console.error('Error purchasing property:', error);
         alert('Failed to purchase property');
+    }
+}
+
+async function startAuctionFromPurchase() {
+    try {
+        await performGameAction('start_auction', {});
+        closeModal('buyPropertyModal');
+        selectedPropertyId = null;
+    } catch (error) {
+        console.error('Error starting auction:', error);
+        alert(error.message || 'Failed to start auction');
+    }
+}
+
+async function placeAuctionBid() {
+    const input = document.getElementById('auctionBidAmount');
+    const amount = parseFloat(input?.value);
+    if (!amount || amount <= 0) {
+        alert('Enter a bid amount greater than $0.');
+        return;
+    }
+
+    try {
+        await performGameAction('place_bid', { amount });
+    } catch (error) {
+        console.error('Error placing auction bid:', error);
+        alert(error.message || 'Failed to place bid');
+    }
+}
+
+async function passAuction() {
+    try {
+        await performGameAction('pass_auction', {});
+    } catch (error) {
+        console.error('Error passing auction:', error);
+        alert(error.message || 'Failed to pass auction');
+    }
+}
+
+async function hostCancelAuction() {
+    if (!confirm('Cancel this auction? No property or cash will move.')) return;
+    try {
+        await performGameAction('host_cancel_auction', {});
+    } catch (error) {
+        console.error('Error canceling auction:', error);
+        alert(error.message || 'Failed to cancel auction');
     }
 }
 
@@ -802,8 +1066,10 @@ async function openCorporationModal() {
             ? corp.availableShares
             : corp.totalShares - shareholders.reduce((sum, s) => sum + s.shares, 0);
         const isFounder = corp.founderId === currentUser.id;
-        const canBuy = isMyTurn && !isFounder && sharesAvailable > 0;
+        const isInsolvent = !!corp.insolvent || corp.status === 'insolvent';
+        const canBuy = isMyTurn && !isFounder && sharesAvailable > 0 && !isInsolvent;
         const governanceHtml = renderChairmanGovernance(corp);
+        const pricePerShare = Number(corp.pricePerShare || 0);
         const shareholderRows = shareholders.length
             ? shareholders.map(s => `<li>${escapeHtml(s.name)}: ${s.shares} shares (${ownershipPercent(s.shares, corp.totalShares)}%)</li>`).join('')
             : '<li>No public shares sold yet</li>';
@@ -813,12 +1079,13 @@ async function openCorporationModal() {
 
         return `
         <div class="corporation-card">
-            <h3>${escapeHtml(corp.ticker)} - ${escapeHtml(corp.name)}</h3>
+            <h3>${escapeHtml(corp.ticker)} - ${escapeHtml(corp.name)} ${isInsolvent ? '<span class="badge badge-danger">Insolvent</span>' : ''}</h3>
             <p>Founder: ${escapeHtml(corp.founderName)}</p>
-            <p>Chairman: ${escapeHtml(corp.chairmanName || corp.founderName || 'Unassigned')}</p>
+            <p>Chairman: ${escapeHtml(isInsolvent ? 'Closed' : (corp.chairmanName || corp.founderName || 'Unassigned'))}</p>
             <p>Majority holder: ${escapeHtml(majorityHolderName(corp) || 'None')}</p>
             <p>Treasury Cash: $${Number(corp.cash || 0).toFixed(2)}</p>
-            <p>Total Shares: ${corp.totalShares} | Available: ${sharesAvailable} | Price: $${corp.pricePerShare.toFixed(2)}/share</p>
+            <p>Total Shares: ${corp.totalShares} | Available: ${sharesAvailable} | Price: $${pricePerShare.toFixed(2)}/share</p>
+            ${isInsolvent ? '<p class="corp-status-warning">This corporation is closed after treasury insolvency. Properties returned to the Bank; shares, debt, and governance were wiped.</p>' : ''}
             <h4>Assets:</h4>
             <ul>
                 ${assets.map(a => `<li>${escapeHtml(a.name)} ($${Number(a.value || 0).toFixed(2)})</li>`).join('') || '<li>No assets</li>'}
@@ -849,6 +1116,14 @@ async function openCorporationModal() {
 }
 
 function renderChairmanGovernance(corp) {
+    if (corp.insolvent || corp.status === 'insolvent') {
+        return `
+            <div class="chairman-governance">
+                <h4>Chairman Governance</h4>
+                <p class="empty-state">Governance closed after insolvency.</p>
+            </div>
+        `;
+    }
     const myShares = sharesForUi(corp, currentUser.id);
     const candidates = chairmanCandidateOptions(corp);
     const voteOptions = candidates.map(player =>
@@ -965,12 +1240,16 @@ async function buyShares(corpId) {
     const gameState = currentGame.game_state;
     const corp = gameState.corporations.find(c => c.id === corpId);
     if (!corp) return;
+    if (corp.insolvent || corp.status === 'insolvent') {
+        alert('This corporation is insolvent and cannot sell shares.');
+        return;
+    }
 
     const numShares = parseInt(document.getElementById(`buyShares-${corpId}`).value);
-    const totalCost = numShares * corp.pricePerShare;
-        const sharesAvailable = typeof corp.availableShares === 'number'
-            ? corp.availableShares
-            : corp.totalShares - (corp.shareholders || []).reduce((sum, s) => sum + s.shares, 0);
+    const totalCost = numShares * Number(corp.pricePerShare || 0);
+    const sharesAvailable = typeof corp.availableShares === 'number'
+        ? corp.availableShares
+        : corp.totalShares - (corp.shareholders || []).reduce((sum, s) => sum + s.shares, 0);
 
     if (!numShares || numShares < 1 || numShares > sharesAvailable) {
         alert(`Enter a valid number of shares (1–${sharesAvailable})`);
@@ -1062,6 +1341,28 @@ async function hostEndGame() {
     await triggerEndGame(gameState, 'Host ended the game.');
 }
 
+async function hostPauseGame() {
+    if (!confirm('Pause the game for everyone? Players will not be able to take normal actions until the host resumes.')) return;
+    try {
+        await performGameAction('host_pause_game', { reason: 'Host paused the game' });
+        showToast('Game paused.');
+    } catch (error) {
+        console.error('Error pausing game:', error);
+        showToast(error.message || 'Failed to pause game.');
+    }
+}
+
+async function hostResumeGame() {
+    if (!confirm('Resume the game for everyone?')) return;
+    try {
+        await performGameAction('host_resume_game', {});
+        showToast('Game resumed.');
+    } catch (error) {
+        console.error('Error resuming game:', error);
+        showToast(error.message || 'Failed to resume game.');
+    }
+}
+
 async function performGameAction(type, payload = {}) {
     try {
         const result = await apiFetch(`/games/${currentGame.id}/actions`, {
@@ -1074,6 +1375,7 @@ async function performGameAction(type, payload = {}) {
             })
         });
         await applyGameUpdate(result.game, { force: true });
+        showLiquidationSummaryFromEvents(result.events || []);
         return result;
     } catch (error) {
         if (error.status === 409) {
@@ -1120,6 +1422,47 @@ function showWinnerFromState(gameState, reason) {
     document.getElementById('winnerReason').textContent = reason || '';
     document.getElementById('finalStandings').innerHTML = standingsHtml;
     document.getElementById('winnerModal').style.display = 'flex';
+}
+
+function showLiquidationSummaryFromEvents(events) {
+    const liquidationEvent = (events || []).find(event => event.type === 'bankruptcy_liquidation');
+    if (!liquidationEvent) return;
+    const bankruptcyEvent = (events || []).find(event => event.type === 'bankruptcy');
+    const data = liquidationEvent.data || {};
+    const destination = data.assetDestinationName || 'the Bank';
+    const reason = data.reason || bankruptcyEvent?.data?.reason || 'bankruptcy';
+    const propertyNames = (data.releasedProperties || []).map(item => item.name || item.id).filter(Boolean);
+    const returnedShares = formatSharePositions(data.returnedSharePositions);
+    const transferredShares = formatSharePositions(data.transferredSharePositions, true);
+
+    const title = `${data.player || 'Player'} Bankruptcy Summary`;
+    const summary = `${data.player || 'The player'} went bankrupt${data.creditor ? ` owing ${data.creditor}` : ''}. Direct properties were ${data.assetDestinationType === 'bank' ? 'returned to' : 'transferred to'} ${destination}.`;
+    const rows = [
+        ['Cause', reason],
+        ['Properties', propertyNames.length ? `${propertyNames.join(', ')} to ${destination}; houses/hotels cleared` : 'No direct properties moved'],
+        ['Shares', [returnedShares, transferredShares].filter(Boolean).join('; ') || 'No player-held shares moved'],
+        ['Debts', 'Personal debts cleared'],
+    ];
+
+    document.getElementById('liquidationModalTitle').textContent = title;
+    document.getElementById('liquidationModalSummary').textContent = summary;
+    document.getElementById('liquidationModalDetails').innerHTML = rows.map(([label, value]) => `
+        <div class="liquidation-row">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+        </div>
+    `).join('');
+    document.getElementById('liquidationModal').style.display = 'flex';
+}
+
+function formatSharePositions(positions, transferred = false) {
+    if (!Array.isArray(positions) || positions.length === 0) return '';
+    return positions.map(item => {
+        const shares = Number(item.shares || 0);
+        const ticker = item.ticker || 'corporation';
+        if (transferred && item.to) return `${shares} ${ticker} share(s) to ${item.to}`;
+        return `${shares} ${ticker} share(s) returned to availability`;
+    }).join(', ');
 }
 
 // Log game event
@@ -1189,24 +1532,92 @@ function populatePlayerDropdowns() {
     const player2Select = document.getElementById('player2Select');
     const paymentFromPlayer = document.getElementById('paymentFromPlayer');
     const paymentToPlayer = document.getElementById('paymentToPlayer');
+    if (!player1Select || !player2Select || !paymentFromPlayer || !paymentToPlayer) return;
 
     const playersHtml = gameState.players.map(p =>
         `<option value="${escapeHtml(p.userId)}">${escapeHtml(p.name)}</option>`
     ).join('');
+
+    const previous = {
+        player1: player1Select.value,
+        player2: player2Select.value,
+        paymentFrom: paymentFromPlayer.value,
+        paymentTo: paymentToPlayer.value,
+    };
+    const firstOtherId = getFirstOtherPlayerId(currentUser.id) || gameState.players[0]?.userId || '';
 
     player1Select.innerHTML = playersHtml;
     player2Select.innerHTML = playersHtml;
     paymentFromPlayer.innerHTML = playersHtml;
     paymentToPlayer.innerHTML = playersHtml;
 
+    setSelectValue(player1Select, previous.player1 || currentUser.id, currentUser.id);
+    setSelectValue(player2Select, previous.player2 || firstOtherId, firstOtherId || currentUser.id);
+    setSelectValue(paymentFromPlayer, currentUser.id, currentUser.id);
+    setSelectValue(paymentToPlayer, previous.paymentTo || firstOtherId, firstOtherId || currentUser.id);
+    paymentFromPlayer.disabled = true;
+    enforceDistinctPlayers(player1Select, player2Select);
+    enforceDistinctPlayers(paymentFromPlayer, paymentToPlayer);
+
     if (!player1Select.dataset.assetsBound) {
-        player1Select.addEventListener('change', () => updatePlayerAssets('player1'));
+        player1Select.addEventListener('change', () => {
+            enforceDistinctPlayers(player1Select, player2Select);
+            updatePlayerAssets('player1');
+            updatePlayerAssets('player2');
+            updateMarketActionState();
+        });
         player1Select.dataset.assetsBound = 'true';
     }
     if (!player2Select.dataset.assetsBound) {
-        player2Select.addEventListener('change', () => updatePlayerAssets('player2'));
+        player2Select.addEventListener('change', () => {
+            enforceDistinctPlayers(player2Select, player1Select);
+            updatePlayerAssets('player1');
+            updatePlayerAssets('player2');
+            updateMarketActionState();
+        });
         player2Select.dataset.assetsBound = 'true';
     }
+    if (!paymentToPlayer.dataset.paymentBound) {
+        paymentToPlayer.addEventListener('change', () => {
+            enforceDistinctPlayers(paymentFromPlayer, paymentToPlayer);
+            updateMarketActionState();
+        });
+        paymentToPlayer.dataset.paymentBound = 'true';
+    }
+    ['player1Cash', 'player2Cash', 'paymentAmount'].forEach(id => {
+        const input = document.getElementById(id);
+        if (input && !input.dataset.marketBound) {
+            input.addEventListener('input', updateMarketActionState);
+            input.dataset.marketBound = 'true';
+        }
+    });
+
+    updatePlayerAssets('player1');
+    updatePlayerAssets('player2');
+    renderTradeOffers();
+    updateMarketActionState();
+}
+
+function setSelectValue(select, preferredValue, fallbackValue) {
+    if (!select) return;
+    const values = Array.from(select.options).map(option => option.value);
+    if (values.includes(preferredValue)) {
+        select.value = preferredValue;
+    } else if (values.includes(fallbackValue)) {
+        select.value = fallbackValue;
+    } else if (select.options.length > 0) {
+        select.selectedIndex = 0;
+    }
+}
+
+function getFirstOtherPlayerId(userId) {
+    return currentGame?.game_state?.players?.find(player => player.userId !== userId)?.userId || null;
+}
+
+function enforceDistinctPlayers(primarySelect, secondarySelect) {
+    if (!primarySelect || !secondarySelect || primarySelect.value !== secondarySelect.value) return;
+    const replacement = Array.from(secondarySelect.options).find(option => option.value !== primarySelect.value);
+    if (replacement) secondarySelect.value = replacement.value;
 }
 
 function updatePlayerAssets(playerNumber) {
@@ -1221,12 +1632,176 @@ function updatePlayerAssets(playerNumber) {
 
     const assetsHtml = player.properties.map(p => `
         <div class="asset-checkbox">
-            <input type="checkbox" id="${playerNumber}-asset-${p.id}" value="${p.id}">
+            <input type="checkbox" id="${playerNumber}-asset-${p.id}" value="${p.id}" onchange="updateMarketActionState()">
             <label for="${playerNumber}-asset-${p.id}">${escapeHtml(p.name)} ($${p.value})</label>
         </div>
     `).join('');
 
     document.getElementById(assetsId).innerHTML = assetsHtml || '<p>No properties</p>';
+}
+
+function updateMarketActionState() {
+    const tradeBtn = document.getElementById('executeTradeBtn');
+    const paymentBtn = document.getElementById('makePaymentBtn');
+    const player1Id = document.getElementById('player1Select')?.value;
+    const player2Id = document.getElementById('player2Select')?.value;
+    const fromPlayerId = document.getElementById('paymentFromPlayer')?.value;
+    const toPlayerId = document.getElementById('paymentToPlayer')?.value;
+    const player1Cash = parseFloat(document.getElementById('player1Cash')?.value) || 0;
+    const player2Cash = parseFloat(document.getElementById('player2Cash')?.value) || 0;
+    const paymentAmount = parseFloat(document.getElementById('paymentAmount')?.value) || 0;
+    const player1Assets = document.querySelectorAll('#player1Assets input:checked').length;
+    const player2Assets = document.querySelectorAll('#player2Assets input:checked').length;
+
+    const tradeHasOffer = player1Cash > 0 || player2Cash > 0 || player1Assets > 0 || player2Assets > 0;
+    const tradeValid = player1Id && player2Id && player1Id !== player2Id && [player1Id, player2Id].includes(currentUser.id) && tradeHasOffer;
+    const paymentValid = fromPlayerId && toPlayerId && fromPlayerId !== toPlayerId && fromPlayerId === currentUser.id && paymentAmount > 0;
+
+    if (tradeBtn) tradeBtn.disabled = !tradeValid;
+    if (paymentBtn) paymentBtn.disabled = !paymentValid;
+}
+
+function showMarketStatus(message, type = 'info') {
+    const el = document.getElementById('market-status');
+    if (!el) {
+        showToast(message);
+        return;
+    }
+    el.textContent = message;
+    el.className = `market-status ${type}`;
+}
+
+function renderTradeOffers() {
+    const container = document.getElementById('tradeOffersList');
+    if (!container || !currentGame) return;
+    const offers = (currentGame.game_state.marketOffers || []).filter(offer => offer.status === 'pending');
+    if (offers.length === 0) {
+        container.innerHTML = '<p class="empty-state">No pending trade offers</p>';
+        return;
+    }
+
+    container.innerHTML = offers.map(offer => {
+        const participant = [offer.player1Id, offer.player2Id].includes(currentUser.id);
+        const expired = isTradeOfferExpiredForDisplay(offer);
+        const canAccept = !expired && participant && offer.proposedById !== currentUser.id;
+        const canCancel = participant;
+        const isHost = currentRoom && currentUser.id === currentRoom.host_id;
+        const canHostCancel = isHost && !canCancel;
+        const canClearExpired = expired && (participant || isHost);
+        const hasActions = canAccept || canCancel || canHostCancel;
+        return `
+            <div class="trade-offer-card${expired ? ' trade-offer-expired' : ''}">
+                <div class="trade-offer-header">
+                    <strong>${escapeHtml(offer.proposedByName)} proposed a trade</strong>
+                    <div class="trade-offer-meta">
+                        <span>${escapeHtml(formatTradeOfferAge(offer.createdAt))}</span>
+                        ${offer.expiresAt ? `<span>${escapeHtml(formatTradeOfferExpiry(offer.expiresAt))}</span>` : ''}
+                    </div>
+                </div>
+                <div class="trade-offer-sides">
+                    <div>
+                        <h4>${escapeHtml(offer.player1Name)} gives</h4>
+                        ${renderTradeOfferSide(offer.player1Cash, offer.player1AssetIds)}
+                    </div>
+                    <div>
+                        <h4>${escapeHtml(offer.player2Name)} gives</h4>
+                        ${renderTradeOfferSide(offer.player2Cash, offer.player2AssetIds)}
+                    </div>
+                </div>
+                ${hasActions ? `
+                    <div class="trade-offer-actions">
+                        ${canAccept ? `<button class="btn btn-success btn-sm" onclick="acceptTradeOffer('${offer.id}')">Accept</button>` : ''}
+                        ${canCancel ? `<button class="btn btn-secondary btn-sm" onclick="cancelTradeOffer('${offer.id}')">${expired ? 'Clear Expired' : (canAccept ? 'Decline' : 'Cancel')}</button>` : ''}
+                        ${canHostCancel ? `<button class="btn btn-danger btn-sm" onclick="hostCancelTradeOffer('${offer.id}')">${expired ? 'Clear Expired' : 'Host Cancel'}</button>` : ''}
+                    </div>
+                ` : `<p class="empty-state">${canClearExpired ? 'Clear this expired offer from the involved player view.' : 'Waiting on the involved players'}</p>`}
+            </div>
+        `;
+    }).join('');
+}
+
+function renderTradeOfferSide(cash, assetIds) {
+    const assetNames = (assetIds || []).map(id => tradeAssetName(id));
+    const lines = [];
+    if (Number(cash || 0) > 0) lines.push(`$${Number(cash).toFixed(2)}`);
+    lines.push(...assetNames);
+    if (lines.length === 0) return '<p class="empty-state">Nothing</p>';
+    return `<ul>${lines.map(line => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`;
+}
+
+function tradeAssetName(assetId) {
+    const property = currentGame?.game_state?.properties?.find(prop => prop.id === assetId);
+    return property ? property.name : assetId;
+}
+
+function formatTradeOfferAge(createdAt) {
+    if (!createdAt) return 'pending';
+    const date = new Date(createdAt);
+    if (Number.isNaN(date.getTime())) return 'pending';
+    return `sent ${formatTimeAgo(createdAt)}`;
+}
+
+function formatTradeOfferExpiry(expiresAt) {
+    const expiry = new Date(expiresAt);
+    if (Number.isNaN(expiry.getTime())) return '';
+    const seconds = Math.max(Math.ceil((expiry.getTime() - Date.now()) / 1000), 0);
+    if (seconds <= 0) return 'expired';
+    if (seconds < 60) return `expires in ${seconds}s`;
+    const minutes = Math.ceil(seconds / 60);
+    return `expires in ${minutes}m`;
+}
+
+function isTradeOfferExpiredForDisplay(offer) {
+    if (!offer?.expiresAt) return false;
+    const expiry = new Date(offer.expiresAt);
+    return !Number.isNaN(expiry.getTime()) && expiry.getTime() <= Date.now();
+}
+
+function actionEventsInclude(result, type) {
+    return Array.isArray(result?.events) && result.events.some(event => event.type === type);
+}
+
+async function acceptTradeOffer(offerId) {
+    try {
+        const result = await performGameAction('accept_trade', { offerId });
+        if (actionEventsInclude(result, 'trade_offer_expired')) {
+            showMarketStatus('Trade offer expired before it could be accepted.', 'error');
+        } else {
+            showMarketStatus('Trade accepted and executed.', 'success');
+        }
+    } catch (error) {
+        console.error('Error accepting trade offer:', error);
+        showMarketStatus(error.message || 'Failed to accept trade offer.', 'error');
+    }
+}
+
+async function cancelTradeOffer(offerId) {
+    try {
+        const result = await performGameAction('cancel_trade', { offerId });
+        if (actionEventsInclude(result, 'trade_offer_expired')) {
+            showMarketStatus('Trade offer expired and was cleared.', 'success');
+        } else {
+            showMarketStatus('Trade offer updated.', 'success');
+        }
+    } catch (error) {
+        console.error('Error canceling trade offer:', error);
+        showMarketStatus(error.message || 'Failed to update trade offer.', 'error');
+    }
+}
+
+async function hostCancelTradeOffer(offerId) {
+    if (!confirm('Cancel this trade offer as host? No cash or properties will move.')) return;
+    try {
+        const result = await performGameAction('host_cancel_trade_offer', { offerId });
+        if (actionEventsInclude(result, 'trade_offer_expired')) {
+            showMarketStatus('Trade offer expired and was cleared.', 'success');
+        } else {
+            showMarketStatus('Trade offer canceled by host.', 'success');
+        }
+    } catch (error) {
+        console.error('Error host-canceling trade offer:', error);
+        showMarketStatus(error.message || 'Failed to cancel trade offer.', 'error');
+    }
 }
 
 async function executeTransaction() {
@@ -1240,8 +1815,21 @@ async function executeTransaction() {
     const player2Assets = Array.from(document.querySelectorAll('#player2Assets input:checked'))
         .map(cb => cb.value);
 
+    if (player1Id === player2Id) {
+        showMarketStatus('Choose two different players for a trade.', 'error');
+        return;
+    }
+    if (![player1Id, player2Id].includes(currentUser.id)) {
+        showMarketStatus('Your trade must include you.', 'error');
+        return;
+    }
+    if (player1Cash <= 0 && player2Cash <= 0 && player1Assets.length === 0 && player2Assets.length === 0) {
+        showMarketStatus('Add cash or property before executing a trade.', 'error');
+        return;
+    }
+
     try {
-        await performGameAction('trade', {
+        await performGameAction('propose_trade', {
             player1Id,
             player2Id,
             player1Cash,
@@ -1249,17 +1837,18 @@ async function executeTransaction() {
             player1AssetIds: player1Assets,
             player2AssetIds: player2Assets,
         });
-        alert('Transaction completed successfully');
+        showMarketStatus('Trade proposal sent. It will execute when the other player accepts.', 'success');
 
         // Reset form
         document.getElementById('player1Cash').value = 0;
         document.getElementById('player2Cash').value = 0;
-        document.getElementById('player1Assets').innerHTML = '';
-        document.getElementById('player2Assets').innerHTML = '';
+        updatePlayerAssets('player1');
+        updatePlayerAssets('player2');
+        updateMarketActionState();
 
     } catch (error) {
         console.error('Error executing transaction:', error);
-        alert('Failed to execute transaction');
+        showMarketStatus(error.message || 'Failed to execute transaction.', 'error');
     }
 }
 
@@ -1269,18 +1858,27 @@ async function makePayment() {
     const amount = parseFloat(document.getElementById('paymentAmount').value);
 
     if (!amount || amount <= 0) {
-        alert('Please enter a valid amount');
+        showMarketStatus('Enter a payment amount greater than $0.', 'error');
+        return;
+    }
+    if (fromPlayerId === toPlayerId) {
+        showMarketStatus('Choose a different recipient.', 'error');
+        return;
+    }
+    if (fromPlayerId !== currentUser.id) {
+        showMarketStatus('Payments must be sent from your player.', 'error');
         return;
     }
 
     try {
         await performGameAction('manual_payment', { fromPlayerId, toPlayerId, amount });
-        alert('Payment completed successfully');
+        showMarketStatus('Payment completed successfully.', 'success');
         document.getElementById('paymentAmount').value = '';
+        updateMarketActionState();
 
     } catch (error) {
         console.error('Error making payment:', error);
-        alert('Failed to make payment');
+        showMarketStatus(error.message || 'Failed to make payment.', 'error');
     }
 }
 

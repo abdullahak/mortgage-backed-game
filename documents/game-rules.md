@@ -9,8 +9,8 @@
 Mortgage Backed Monopoly is a fully-digital, multiplayer parody of Monopoly layered with Wall Street financial mechanics. On top of buying properties and collecting rent, players can:
 
 - **IPO their properties** — bundle them into corporations, issue shares, and sell equity to other players
-- **Issue debt** — borrow cash against any interest rate you set, with compounding interest
-- **Trade freely** — swap cash and properties with any player via the Market tab
+- **Issue debt** — borrow cash at the room's debt rate, with compounding interest
+- **Trade freely** — swap cash and properties through the Market tab
 
 The game runs entirely in the browser; there are no physical components, no banker, and no manual bookkeeping. All state is shared in real time.
 
@@ -79,8 +79,10 @@ The game screen has four tabs accessible via the top navigation bar:
 1. Switch to the **Board** tab on your turn.
 2. Click **Roll Dice** — your token moves automatically.
 3. A toast notification describes what happened (e.g., "unowned — buy it via the Game tab", "rent owed", "Chance card drawn").
-4. If you owe rent or taxes, a prompt will appear. Click **Pay** to confirm.
+4. Rent, taxes, and card effects are applied automatically and recorded in the log.
 5. You can roll again only if you rolled doubles; otherwise, complete your actions and click **End Turn** in the **Game** tab.
+
+End Turn is only valid after the current player has rolled. The UI disables it before rolling, and the server rejects unrolled end-turn actions.
 
 **Rolling three consecutive doubles** sends you directly to Jail.
 
@@ -92,8 +94,20 @@ When you land on an unowned property:
 
 1. A toast shows: *"[Property] is unowned — buy it via the Game tab."*
 2. Switch to the **Game** tab and click **Buy Property**.
-3. Select the property from the list. The purchase price is pre-filled but can be adjusted (useful for negotiated off-market deals).
-4. Click **Confirm Purchase** — the price is deducted from your cash immediately.
+3. Review the property and fixed purchase price.
+4. Click **Buy Property** — the price is deducted from your cash immediately.
+
+If you choose not to buy the property, click **Start Auction** from the purchase modal:
+
+- Active players bid or pass from the **Game** tab.
+- Bids must exceed the current high bid and must be affordable by the bidder.
+- The current high bidder is committed and cannot pass.
+- When every other active player has passed, the high bidder pays the winning bid and receives the property.
+- If every active player passes before any bid, the property remains unowned.
+- Auctions have a two-minute idle timeout by default. Bids and passes refresh the timeout.
+- The next game action after timeout resolves the auction automatically: the high bidder wins, or the property remains unowned if there were no bids.
+- The current turn cannot end until the auction resolves.
+- The host can cancel a stuck auction. Canceling an auction does not move cash or property.
 
 You cannot buy property when it is not your turn.
 
@@ -163,7 +177,7 @@ Rent = dice roll × multiplier:
 
 ### Paying Rent
 
-When you land on an owned property, a **rent prompt** appears automatically. It shows the amount owed and your cash before and after. Click **Pay** to transfer funds to the owner. Rent is not automatically deducted — you must confirm.
+When you land on an owned property, rent is transferred automatically and recorded in the log. The Game tab shows recent cash flow so players can see what they paid and received.
 
 ---
 
@@ -180,30 +194,42 @@ Any player may bundle one or more of their properties into a corporation and sel
 
 ### Selling Shares
 
-Other players can buy available shares from the **View Corporations** modal (accessible via the **Game** tab during their turn). When a player buys shares:
+Other players can buy available shares from the **Corporations** modal (accessible via the **Game** tab during their turn). When a player buys shares:
 
 - Their cash is deducted by `shares × price per share`.
-- The **founder receives the payment directly** — corporations are not a separate treasury.
+- The payment goes into the corporation treasury.
 - The buyer's shareholding is recorded on the corporation ledger.
 
 ### Founder Mechanics
 
-The founder retains all shares initially. They can sell as many as they choose (simply by setting the total share count high). The founder cannot buy shares in their own corporation.
+The founder starts as chairman. The public shareholder ledger begins empty, and purchased shares reduce the corporation's available share count. The founder cannot buy shares in their own corporation.
 
 ### Corporation Value in Net Worth
 
 A player's stake in any corporation contributes `sharesOwned × pricePerShare` to their net worth at game end.
 
+### Corporation Insolvency
+
+If a corporation's treasury falls below $0 when corporate debt interest is charged, the corporation is closed as insolvent:
+
+- Corporation-owned properties return to the bank and any houses/hotels are cleared.
+- Corporation debts are wiped.
+- Shareholder positions are wiped, available shares become 0, and the share price becomes $0.
+- The chairman seat is cleared and open chairman votes are closed.
+- Insolvent corporations cannot collect rent, sell shares, issue debt, or use chairman governance controls.
+
+The Corporations modal shows an **Insolvent** badge and explains that assets, debt, shares, and governance were closed.
+
 ---
 
 ## 10. Debt & Interest
 
-Players can issue themselves debt at any interest rate they choose — simulating leveraged buyouts, margin loans, or mortgage-backed instruments.
+Players can issue themselves debt at the room's debt rate — simulating leveraged buyouts, margin loans, or mortgage-backed instruments.
 
 ### Issuing Debt
 
 1. Go to the **Game** tab → **Manage Debt** → select **Issue New Debt**.
-2. Enter the loan amount and interest rate (%). Optionally select collateral properties (informational only — collateral is not seized automatically).
+2. Enter the loan amount. Optionally select collateral properties (informational only — collateral is not seized automatically).
 3. Click **Confirm** — cash is added to your balance immediately.
 
 ### Interest Accrual
@@ -217,7 +243,7 @@ Interest charged = new principal − old principal
 
 The interest charged is deducted from your cash at turn end, before bankruptcy is checked. This means a high-interest loan can spiral quickly.
 
-The default rate shown in the UI is **5%**, but you set the actual rate when issuing debt.
+The default room debt rate is **5% per turn**.
 
 ### Repaying Debt
 
@@ -231,13 +257,25 @@ Partial payments are allowed.
 
 ## 11. Bankruptcy
 
-Bankruptcy is triggered automatically when your **cash drops below $0 at the end of your turn** (after interest accrual).
+Bankruptcy is triggered automatically when your **cash drops below $0 at the end of your turn** or when you end the turn with an **unpaid rent claim**.
 
 - A `BANKRUPT` flag is set on your account.
 - The game log shows a bankruptcy announcement.
-- **You remain in the game** — you keep your properties and corporations — but you are **skipped** in the turn order until you recover.
+- You can no longer act through the server API.
+- Pending trade offers involving you are canceled automatically.
+- You are **skipped** in the turn order.
+- Your personal debts are cleared.
+- If you were a corporation chairman, chairmanship passes to the active non-bankrupt shareholder with the most shares. If no active shareholder exists, it falls back to an active non-bankrupt founder. If neither exists, the chair is left vacant.
+- Open chairman votes involving you are closed.
+- A liquidation summary appears after bankruptcy so players can see the cause, destination of assets, share movement, and debt cleanup.
 
-There is no forced liquidation. Bankrupt players can still receive rent, dividends (if others buy their corporation shares), or card windfalls that restore positive cash.
+If you cannot afford rent owed to another player or corporation, you pay only the cash you actually have and the unpaid remainder is tracked as a claim. If you raise enough cash before ending the turn, that claim is paid and bankruptcy is avoided. If the claim is still unpaid when you end the turn:
+
+- Rent owed to a player transfers your directly owned properties and player-held corporation shares to that player.
+- Rent owed to a corporation transfers your directly owned properties to that corporation. Player-held shares return to their issuing corporation's available share pool.
+- Houses/hotels on transferred properties are removed.
+
+Bank, tax, card, jail bail, and interest bankruptcies return your directly owned properties to the bank and return player-held shares to their issuing corporation's available share pool. Bankruptcy is final. Corporation-owned properties and corporation debts stay with the corporation unless that corporation later becomes insolvent.
 
 ---
 
@@ -245,22 +283,25 @@ There is no forced liquidation. Bankrupt players can still receive rent, dividen
 
 ### Player-to-Player Trades
 
-Trades let two players exchange any combination of cash and properties simultaneously.
+Trades let two players exchange any combination of cash and properties after both involved players agree.
 
 1. Go to the **Market** tab.
 2. Select **Player 1** and **Player 2** from the dropdowns.
 3. Enter how much cash each player contributes to the swap.
 4. Check the properties each player is transferring.
-5. Click **Execute Transaction** — all transfers happen atomically.
+5. Click **Propose Transaction** — the offer appears under **Pending Trade Offers**.
+6. The other involved player accepts to execute the transfer, or declines to reject it.
 
-Trades can be done at any time, not only on your turn. There is no built-in negotiation UI — arrange the terms in chat or voice first.
+Pending trade offers expire after the configured trade-offer timeout. Expired offers never move cash or properties; the next game action clears the offer and logs the expiration. The host can also cancel abandoned pending trade offers. Host cancellation does not move cash or properties.
+
+Trades can be proposed and accepted at any time, not only on your turn. The acting player must be one side of the trade. There is no built-in chat yet — arrange the terms in chat or voice first.
 
 ### Direct Payments
 
 For simple cash transfers (rent side-deals, fines, gifts):
 
 1. Go to the **Market** tab → **Direct Payment** section.
-2. Select the payer, the recipient, and the amount.
+2. Select the recipient and amount.
 3. Click **Pay** — funds move instantly.
 
 ---
@@ -281,6 +322,8 @@ On each turn while in Jail, roll the dice:
 - **No doubles, turns 1–2** → still in Jail; turn ends.
 - **No doubles, turn 3** → forced to pay **$50 bail**, then move.
 
+Leaving Jail by rolling doubles or by forced third-turn bail consumes that turn's roll; you do not roll again afterward.
+
 If you hold a **Get Out of Jail Free** card (from a Chance or Community Chest draw), it is used automatically on your next jail turn.
 
 While in Jail you can still buy properties, create IPOs, manage debt, and trade via the Market tab.
@@ -295,7 +338,11 @@ If all players except one are bankrupt, the game ends automatically and that pla
 
 ### Host-Ended Game
 
-At any point, the **host** can click **End Game** (visible only to them during their turn). The game ends immediately and winners are ranked by net worth.
+At any point, the **host** can click **End Game**. The game ends immediately and winners are ranked by net worth.
+
+### Host Pause / Resume
+
+The host can pause a live game from the game screen. While paused, normal player actions are blocked for everyone and the game shows a paused banner. The host can resume the game, end it, or clear stuck auctions and trade offers. Pause and resume actions are written to the game log and event stream.
 
 ---
 
@@ -323,6 +370,7 @@ Property value is recorded at purchase price. There is no market appreciation or
 | Income Tax | $200 |
 | Luxury Tax | $100 |
 | Jail bail (forced, turn 3) | $50 |
+| End Turn gate | Current player must roll first |
 | Interest timing | End of your turn |
 | Bankruptcy trigger | Cash < $0 at turn end |
 | Win condition | Last solvent player OR host ends game |

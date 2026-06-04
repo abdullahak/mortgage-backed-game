@@ -275,4 +275,422 @@ test.describe('Game mechanics — UI', () => {
             await expect(page.locator('body')).toBeVisible();
         }
     });
+
+    test('negative current-player cash shows bankruptcy warning before end turn', async ({ page, request }) => {
+        const h = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const g = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const room = await (await request.post(`${BASE_API}/rooms`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+            data: { name: 'Negative Cash UI Room', player_name: 'Alice', max_players: 4 },
+        })).json();
+        await request.post(`${BASE_API}/rooms/${room.id}/join`, {
+            headers: { Authorization: `Bearer ${g.token}` },
+            data: { player_name: 'Bob' },
+        });
+        await request.post(`${BASE_API}/games`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+            data: { room_id: room.id, game_state: {
+                currentPlayerIndex: 0,
+                players: [
+                    { userId: h.user.id, name: 'Alice', cash: -25, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: true, hasGetOutOfJailCard: false },
+                    { userId: g.user.id, name: 'Bob', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                ],
+                properties: [],
+                corporations: [],
+                debts: [],
+                lastDiceRoll: [3, 4],
+                lastCardDrawn: null,
+                settings: { passGoAmount: 200, startingCash: 1500 },
+            }},
+        });
+
+        await loginPage(page, h.token);
+        await page.goto(`${BASE}/game.html?room=${room.id}`);
+        await page.waitForLoadState('domcontentloaded');
+
+        await expect(page.locator('.turn-warning.danger')).toContainText('below zero', { timeout: 5000 });
+        await expect(page.locator('.action-btn-end-turn')).toHaveText('Declare Bankruptcy');
+    });
+
+    test('after rolling doubles to leave Jail, the UI shows End Turn instead of another Roll Dice', async ({ page, request }) => {
+        const h = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const g = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const room = await (await request.post(`${BASE_API}/rooms`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+            data: { name: 'Jail Doubles UI Room', player_name: 'Alice', max_players: 4 },
+        })).json();
+        await request.post(`${BASE_API}/rooms/${room.id}/join`, {
+            headers: { Authorization: `Bearer ${g.token}` },
+            data: { player_name: 'Bob' },
+        });
+        const game = await (await request.post(`${BASE_API}/games`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+            data: { room_id: room.id, game_state: {
+                currentPlayerIndex: 0,
+                players: [
+                    { userId: h.user.id, name: 'Alice', cash: 1500, position: 14, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: true, hasGetOutOfJailCard: false },
+                    { userId: g.user.id, name: 'Bob', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                ],
+                properties: [],
+                corporations: [],
+                debts: [],
+                gameLog: [{
+                    timestamp: new Date().toISOString(),
+                    message: 'Alice rolled 2+2=4 - moved to Virginia Ave',
+                }],
+                lastDiceRoll: [2, 2],
+                lastCardDrawn: null,
+                settings: { passGoAmount: 200, startingCash: 1500 },
+            }},
+        })).json();
+
+        await loginPage(page, h.token);
+        await page.goto(`${BASE}/game.html?room=${room.id}`);
+        await page.waitForLoadState('domcontentloaded');
+
+        await expect(page.getByRole('button', { name: /Roll Dice/ })).toHaveCount(0);
+        await expect(page.locator('.action-btn-end-turn')).toHaveText('End Turn');
+        await expect(page.locator('.action-btn-end-turn')).toBeEnabled();
+        await expect(page.locator('.recent-log')).not.toContainText('roll again');
+
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+        })).json();
+        const alice = fetched.game_state.players.find(player => player.userId === h.user.id);
+        expect(alice.inJail).toBe(false);
+        expect(alice.position).toBe(14);
+        expect(alice.diceRolled).toBe(true);
+        expect(alice.doubleCount).toBe(0);
+    });
+
+    test('after forced third-turn Jail bail, the UI shows bankruptcy warning when cash is below zero', async ({ page, request }) => {
+        const h = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const g = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const room = await (await request.post(`${BASE_API}/rooms`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+            data: { name: 'Jail Bail Warning Room', player_name: 'Alice', max_players: 4 },
+        })).json();
+        await request.post(`${BASE_API}/rooms/${room.id}/join`, {
+            headers: { Authorization: `Bearer ${g.token}` },
+            data: { player_name: 'Bob' },
+        });
+        const game = await (await request.post(`${BASE_API}/games`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+            data: { room_id: room.id, game_state: {
+                currentPlayerIndex: 0,
+                players: [
+                    { userId: h.user.id, name: 'Alice', cash: -25, position: 13, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: true, hasGetOutOfJailCard: false },
+                    { userId: g.user.id, name: 'Bob', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                ],
+                properties: [],
+                corporations: [],
+                debts: [],
+                gameLog: [{
+                    timestamp: new Date().toISOString(),
+                    message: 'Alice paid $50 bail after their third Jail turn.',
+                }],
+                lastDiceRoll: [1, 2],
+                lastCardDrawn: null,
+                settings: { passGoAmount: 200, startingCash: 1500 },
+            }},
+        })).json();
+
+        await loginPage(page, h.token);
+        await page.goto(`${BASE}/game.html?room=${room.id}`);
+        await page.waitForLoadState('domcontentloaded');
+
+        await expect(page.locator('.turn-warning.danger')).toContainText('below zero', { timeout: 5000 });
+        await expect(page.locator('.action-btn-end-turn')).toHaveText('Declare Bankruptcy');
+        await expect(page.locator('.recent-log')).toContainText('paid $50 bail');
+
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+        })).json();
+        const alice = fetched.game_state.players.find(player => player.userId === h.user.id);
+        expect(alice.inJail).toBe(false);
+        expect(alice.cash).toBe(-25);
+        expect(alice.diceRolled).toBe(true);
+    });
+
+    test('declaring bankruptcy releases direct properties and advances to next active player', async ({ page, request }) => {
+        const h = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const g = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const c = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const room = await (await request.post(`${BASE_API}/rooms`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+            data: { name: 'Bankruptcy Liquidation Room', player_name: 'Alice', max_players: 4 },
+        })).json();
+        await request.post(`${BASE_API}/rooms/${room.id}/join`, {
+            headers: { Authorization: `Bearer ${g.token}` },
+            data: { player_name: 'Bob' },
+        });
+        await request.post(`${BASE_API}/rooms/${room.id}/join`, {
+            headers: { Authorization: `Bearer ${c.token}` },
+            data: { player_name: 'Carol' },
+        });
+
+        const game = await (await request.post(`${BASE_API}/games`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+            data: { room_id: room.id, game_state: {
+                currentPlayerIndex: 0,
+                players: [
+                    {
+                        userId: h.user.id,
+                        name: 'Alice',
+                        cash: -25,
+                        position: 0,
+                        bankrupt: false,
+                        inJail: false,
+                        jailTurns: 0,
+                        doubleCount: 0,
+                        diceRolled: true,
+                        hasGetOutOfJailCard: false,
+                        debts: [{ id: 'debt-alice', issuerId: h.user.id, principal: 100, interestRate: 0, turnsOutstanding: 0 }],
+                    },
+                    { userId: g.user.id, name: 'Bob', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                    { userId: c.user.id, name: 'Carol', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                ],
+                properties: [
+                    { id: 'prop-0', name: 'Mediterranean Ave', color: 'Brown', price: 60, rent: [2, 10, 30, 90, 160, 250], ownerId: h.user.id, ownerName: 'Alice', houses: 3 },
+                ],
+                corporations: [],
+                debts: [],
+                lastDiceRoll: [3, 4],
+                lastCardDrawn: null,
+                settings: { passGoAmount: 200, startingCash: 1500 },
+            }},
+        })).json();
+
+        await loginPage(page, h.token);
+        await page.goto(`${BASE}/game.html?room=${room.id}`);
+        await page.waitForLoadState('domcontentloaded');
+
+        await expect(page.locator('.turn-warning.danger')).toContainText('below zero', { timeout: 5000 });
+        await expect(page.locator('.player-card.current-user')).toContainText('Mediterranean Ave');
+
+        await Promise.all([
+            page.waitForResponse(response => response.url().includes(`/games/${game.id}/actions`) && response.status() === 200),
+            page.locator('.action-btn-end-turn').click(),
+        ]);
+
+        const liquidationModal = page.locator('#liquidationModal');
+        await expect(liquidationModal).toBeVisible({ timeout: 5000 });
+        await expect(liquidationModal).toContainText('Alice Bankruptcy Summary');
+        await expect(liquidationModal).toContainText('returned to the Bank');
+        await expect(liquidationModal).toContainText('Mediterranean Ave to the Bank');
+        await expect(liquidationModal).toContainText('Personal debts cleared');
+        await liquidationModal.locator('button', { hasText: 'OK' }).click();
+        await expect(liquidationModal).toBeHidden();
+
+        await expect(page.locator('.game-header h2')).toContainText('Bob', { timeout: 5000 });
+        await expect(page.locator('.player-card.current-user')).toContainText('Bankrupt');
+        await expect(page.locator('.player-card.current-user')).not.toContainText('Mediterranean Ave');
+
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+        })).json();
+        expect(fetched.game_state.currentPlayerIndex).toBe(1);
+        expect(fetched.game_state.players[0].bankrupt).toBe(true);
+        expect(fetched.game_state.players[0].debts).toEqual([]);
+        expect(fetched.game_state.players[0].properties).toEqual([]);
+        expect(fetched.game_state.properties[0].ownerId).toBeNull();
+        expect(fetched.game_state.properties[0].ownerName).toBeNull();
+        expect(fetched.game_state.properties[0].houses).toBe(0);
+    });
+
+    test('unpaid rent claim shows creditor warning and transfers assets to the creditor on bankruptcy', async ({ page, request }) => {
+        const h = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const g = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const c = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const room = await (await request.post(`${BASE_API}/rooms`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+            data: { name: 'Creditor Bankruptcy Room', player_name: 'Alice', max_players: 4 },
+        })).json();
+        await request.post(`${BASE_API}/rooms/${room.id}/join`, {
+            headers: { Authorization: `Bearer ${g.token}` },
+            data: { player_name: 'Bob' },
+        });
+        await request.post(`${BASE_API}/rooms/${room.id}/join`, {
+            headers: { Authorization: `Bearer ${c.token}` },
+            data: { player_name: 'Carol' },
+        });
+
+        const game = await (await request.post(`${BASE_API}/games`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+            data: { room_id: room.id, game_state: {
+                currentPlayerIndex: 0,
+                players: [
+                    { userId: h.user.id, name: 'Alice', cash: 0, position: 39, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: true, hasGetOutOfJailCard: false },
+                    { userId: g.user.id, name: 'Bob', cash: 1520, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                    { userId: c.user.id, name: 'Carol', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                ],
+                properties: [
+                    { id: 'prop-0', name: 'Mediterranean Ave', color: 'Brown', price: 60, rent: [2, 10, 30, 90, 160, 250], ownerId: h.user.id, ownerName: 'Alice', houses: 2 },
+                    { id: 'prop-26', name: 'Boardwalk', color: 'Dark Blue', price: 400, rent: [50, 200, 600, 1400, 1700, 2000], ownerId: g.user.id, ownerName: 'Bob', houses: 0 },
+                ],
+                corporations: [],
+                debts: [],
+                bankruptcyClaims: {
+                    [h.user.id]: {
+                        debtorId: h.user.id,
+                        debtorName: 'Alice',
+                        creditorId: g.user.id,
+                        creditorName: 'Bob',
+                        creditorType: 'player',
+                        reason: 'Rent for Boardwalk',
+                        propertyId: 'prop-26',
+                        propertyName: 'Boardwalk',
+                        amountOwed: 50,
+                        paidAmount: 20,
+                        unpaidAmount: 30,
+                        createdAt: new Date().toISOString(),
+                    },
+                },
+                lastDiceRoll: [1, 2],
+                lastCardDrawn: null,
+                settings: { passGoAmount: 200, startingCash: 1500 },
+            }},
+        })).json();
+
+        await loginPage(page, h.token);
+        await page.goto(`${BASE}/game.html?room=${room.id}`);
+        await page.waitForLoadState('domcontentloaded');
+
+        await expect(page.locator('.turn-warning.danger')).toContainText('unpaid to Bob', { timeout: 5000 });
+        await expect(page.locator('.action-btn-end-turn')).toHaveText('Declare Bankruptcy');
+
+        await Promise.all([
+            page.waitForResponse(response => response.url().includes(`/games/${game.id}/actions`) && response.status() === 200),
+            page.locator('.action-btn-end-turn').click(),
+        ]);
+
+        const liquidationModal = page.locator('#liquidationModal');
+        await expect(liquidationModal).toBeVisible({ timeout: 5000 });
+        await expect(liquidationModal).toContainText('Alice Bankruptcy Summary');
+        await expect(liquidationModal).toContainText('owing Bob');
+        await expect(liquidationModal).toContainText('Mediterranean Ave to Bob');
+        await expect(liquidationModal).toContainText('Personal debts cleared');
+        await liquidationModal.locator('button', { hasText: 'OK' }).click();
+        await expect(liquidationModal).toBeHidden();
+
+        await expect(page.locator('.game-header h2')).toContainText('Bob', { timeout: 5000 });
+        await expect(page.locator('.player-card.current-user')).toContainText('Bankrupt');
+        await expect(page.locator('.player-card.current-user')).not.toContainText('Mediterranean Ave');
+
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+        })).json();
+        const transferredProperty = fetched.game_state.properties.find(prop => prop.id === 'prop-0');
+        const boardwalk = fetched.game_state.properties.find(prop => prop.id === 'prop-26');
+        expect(fetched.game_state.bankruptcyClaims[h.user.id]).toBeUndefined();
+        expect(fetched.game_state.players.find(player => player.userId === h.user.id).bankrupt).toBe(true);
+        expect(fetched.game_state.players.find(player => player.userId === g.user.id).cash).toBe(1520);
+        expect(transferredProperty.ownerId).toBe(g.user.id);
+        expect(transferredProperty.ownerName).toBe('Bob');
+        expect(transferredProperty.houses).toBe(0);
+        expect(boardwalk.ownerId).toBe(g.user.id);
+    });
+
+    test('corporation insolvency is visible and closes corporation controls', async ({ page, request }) => {
+        const h = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const g = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const c = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
+        const room = await (await request.post(`${BASE_API}/rooms`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+            data: { name: 'Corporation Insolvency Room', player_name: 'Alice', max_players: 4 },
+        })).json();
+        await request.post(`${BASE_API}/rooms/${room.id}/join`, {
+            headers: { Authorization: `Bearer ${g.token}` },
+            data: { player_name: 'Bob' },
+        });
+        await request.post(`${BASE_API}/rooms/${room.id}/join`, {
+            headers: { Authorization: `Bearer ${c.token}` },
+            data: { player_name: 'Carol' },
+        });
+
+        const game = await (await request.post(`${BASE_API}/games`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+            data: { room_id: room.id, game_state: {
+                currentPlayerIndex: 0,
+                players: [
+                    { userId: h.user.id, name: 'Alice', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: true, hasGetOutOfJailCard: false },
+                    { userId: g.user.id, name: 'Bob', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                    { userId: c.user.id, name: 'Carol', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                ],
+                properties: [
+                    { id: 'prop-0', name: 'Mediterranean Ave', color: 'Brown', price: 60, rent: [2, 10, 30, 90, 160, 250], ownerId: 'corp-1', ownerName: '[MBS]', houses: 3 },
+                ],
+                corporations: [{
+                    id: 'corp-1',
+                    ticker: 'MBS',
+                    name: 'MBS Corporation',
+                    founderId: h.user.id,
+                    founderName: 'Alice',
+                    chairmanId: h.user.id,
+                    chairmanName: 'Alice',
+                    totalShares: 8,
+                    pricePerShare: 50,
+                    availableShares: 5,
+                    assets: [{ id: 'prop-0', name: 'Mediterranean Ave', value: 60, color: 'Brown' }],
+                    shareholders: [
+                        { userId: g.user.id, name: 'Bob', shares: 2 },
+                        { userId: c.user.id, name: 'Carol', shares: 1 },
+                    ],
+                    debts: [{ id: 'corp-debt-1', principal: 100, interestRate: 5, collateral: [], issuerType: 'corporation' }],
+                    cash: 1,
+                    chairmanVotes: [{
+                        id: 'vote-1',
+                        type: 'chairman',
+                        status: 'open',
+                        candidateUserId: g.user.id,
+                        candidateName: 'Bob',
+                        supporters: [{ userId: g.user.id, name: 'Bob' }],
+                        createdBy: g.user.id,
+                        createdAt: '2026-01-01T00:00:00.000Z',
+                    }],
+                }],
+                debts: [],
+                marketOffers: [],
+                gameLog: [],
+                lastDiceRoll: [3, 4],
+                lastCardDrawn: null,
+                settings: { passGoAmount: 200, startingCash: 1500, interestRate: 5 },
+            }},
+        })).json();
+
+        await loginPage(page, h.token);
+        await page.goto(`${BASE}/game.html?room=${room.id}`);
+        await page.waitForLoadState('domcontentloaded');
+
+        await Promise.all([
+            page.waitForResponse(response => response.url().includes(`/games/${game.id}/actions`) && response.status() === 200),
+            page.locator('.action-btn-end-turn').click(),
+        ]);
+
+        await expect(page.locator('.recent-log')).toContainText('MBS became insolvent', { timeout: 5000 });
+        await page.getByRole('button', { name: 'Corporations' }).click();
+
+        const modal = page.locator('#corporationModal');
+        await expect(modal).toBeVisible({ timeout: 5000 });
+        await expect(modal).toContainText('Insolvent');
+        await expect(modal).toContainText('Properties returned to the Bank');
+        await expect(modal).toContainText('Governance closed after insolvency');
+        await expect(modal).toContainText('No assets');
+        await expect(modal).toContainText('No corporation debt');
+        await expect(modal.getByRole('button', { name: /^Buy$/ })).toHaveCount(0);
+
+        const fetched = await (await request.get(`${BASE_API}/games/${game.id}`, {
+            headers: { Authorization: `Bearer ${h.token}` },
+        })).json();
+        const corporation = fetched.game_state.corporations.find(item => item.id === 'corp-1');
+        const releasedProperty = fetched.game_state.properties.find(prop => prop.id === 'prop-0');
+
+        expect(corporation.insolvent).toBe(true);
+        expect(corporation.status).toBe('insolvent');
+        expect(corporation.shareholders).toEqual([]);
+        expect(corporation.debts).toEqual([]);
+        expect(corporation.chairmanVotes[0].closeReason).toBe('corporation_insolvent');
+        expect(releasedProperty.ownerId).toBeNull();
+        expect(releasedProperty.houses).toBe(0);
+    });
 });

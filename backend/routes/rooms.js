@@ -3,10 +3,18 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const { requireAuth, makeToken } = require('./auth');
 const { sendEmail } = require('../mailer');
+const { getConfig } = require('../config');
+const { createRateLimiter, getRequestActorKey } = require('../rateLimit');
 
 module.exports = (io) => {
 const router = express.Router();
 const VALID_ROOM_STATUSES = new Set(['waiting', 'in_progress', 'completed']);
+const config = getConfig();
+const roomCreateRateLimit = createRateLimiter({
+    name: 'room_create',
+    ...config.rateLimits.roomCreate,
+    keyGenerator: getRequestActorKey,
+});
 
 // Helper: get room with members
 function getRoomWithMembers(roomId) {
@@ -25,7 +33,7 @@ function getRoomByInviteCode(code) {
 }
 
 // POST /api/rooms — create room
-router.post('/', requireAuth, (req, res) => {
+router.post('/', requireAuth, roomCreateRateLimit, (req, res) => {
     const { name, max_players, player_name } = req.body;
     if (!name || !player_name) {
         return res.status(400).json({ error: 'name and player_name required' });

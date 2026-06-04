@@ -62,13 +62,24 @@ BACKUP_DIR=/mnt/ssd/backups/mortgage-backed \
 scripts/backup-db.sh
 ```
 
-Restore example:
+Restore to a dev database for rehearsal:
 
 ```bash
-cp /mnt/ssd/backups/mortgage-backed/game-YYYYMMDDTHHMMSSZ.db /mnt/ssd/projects/mortgage-backed/backend/game.db
+DB_PATH=/mnt/ssd/dev-data/mortgage-backed/restore-rehearsal.db \
+scripts/restore-db.sh /mnt/ssd/backups/mortgage-backed/game-YYYYMMDDTHHMMSSZ.db
 ```
 
-Stop the backend before restoring, then start it again.
+Production restore requires the backend to be stopped first and an explicit confirmation flag:
+
+```bash
+sudo systemctl stop mortgage-backend
+CONFIRM_RESTORE=restore-production \
+DB_PATH=/mnt/ssd/projects/mortgage-backed/backend/game.db \
+scripts/restore-db.sh /mnt/ssd/backups/mortgage-backed/game-YYYYMMDDTHHMMSSZ.db
+sudo systemctl start mortgage-backend
+```
+
+The restore script checks the backup before copying, preserves the current database in a pre-restore backup directory when one exists, and checks the restored database afterward.
 
 ## Verification
 
@@ -84,4 +95,10 @@ E2E against dev ports:
 BASE_URL=http://100.110.102.49:3011 \
 API_BASE_URL=http://100.110.102.49:3111/api \
 npm run test:e2e
+```
+
+Release real-player E2E against dev-only ports and a dev-only SQLite database:
+
+```bash
+npm run test:e2e:real-game
 ```
