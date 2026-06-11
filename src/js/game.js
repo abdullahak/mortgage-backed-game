@@ -5,6 +5,7 @@ let currentRoom = null;
 let currentUser = null;
 let gameChannel = null;
 let currentPlayerData = null;
+let pendingWinnerStateAfterLiquidation = null;
 
 // Hotseat mode (same-device local play)
 let isHotseatMode = false;
@@ -132,8 +133,8 @@ async function applyGameUpdate(game, options = {}) {
     renderBoardTab();
     populatePlayerDropdowns();
 
-    if (gameState.ended) {
-        showWinnerFromState(gameState, gameState.gameLog.length ? gameState.gameLog[gameState.gameLog.length - 1].message : 'Game over');
+    if (gameState.ended && !options.suppressWinner) {
+        showWinnerFromState(gameState, winnerReasonFromState(gameState));
     }
 }
 
@@ -630,12 +631,12 @@ function renderActionButtons() {
     return `
         <div class="action-buttons">
             ${!hasRolled ? '<button class="btn btn-primary" style="margin-bottom:8px;width:100%;" onclick="rollDiceAndMove()">🎲 Roll Dice</button>' : ''}
-            <button class="btn btn-success action-btn-end-turn" onclick="endTurn()" ${!hasRolled || auctionOpen ? `disabled title="${auctionOpen ? 'Resolve auction before ending your turn' : 'Roll before ending your turn'}"` : ''}>${escapeHtml(auctionOpen ? 'Resolve Auction' : endTurnLabel)}</button>
             <div class="action-btn-secondary-group">
                 ${auctionOpen ? '<button class="btn btn-secondary btn-sm action-btn-buy" disabled>Auction Open</button>' : buyButton}
                 <button class="btn btn-secondary btn-sm" onclick="openIPOModal()" ${auctionOpen ? 'disabled' : ''}>Create IPO</button>
                 <button class="btn btn-secondary btn-sm" onclick="openDebtModal()" ${auctionOpen ? 'disabled' : ''}>Manage Debt</button>
                 <button class="btn btn-secondary btn-sm" onclick="openCorporationModal()">Corporations</button>
+                <button class="btn btn-success action-btn-end-turn" onclick="endTurn()" ${!hasRolled || auctionOpen ? `disabled title="${auctionOpen ? 'Resolve auction before ending your turn' : 'Roll before ending your turn'}"` : ''}>${escapeHtml(auctionOpen ? 'Resolve Auction' : endTurnLabel)}</button>
                 ${isHost ? '<button class="btn btn-warning btn-sm" onclick="hostPauseGame()">Pause Game</button>' : ''}
                 ${isHost ? '<button class="btn btn-danger btn-sm" onclick="hostEndGame()">End Game</button>' : ''}
             </div>
@@ -791,7 +792,11 @@ async function loadGameLog() {
         `).join('');
 
     } catch (error) {
-        console.error('Error loading game log:', error);
+        if (error instanceof TypeError && error.message === 'Failed to fetch') {
+            console.warn('Unable to refresh game log:', error.message);
+        } else {
+            console.error('Error loading game log:', error);
+        }
     }
 }
 
@@ -1346,10 +1351,7 @@ async function endTurn() {
         await performGameAction('end_turn', {});
         const gameState = currentGame.game_state;
         const nextPlayer = gameState.players[gameState.currentPlayerIndex];
-        if (gameState.ended) {
-            showWinnerFromState(gameState, gameState.gameLog.length ? gameState.gameLog[gameState.gameLog.length - 1].message : 'Game over');
-            return;
-        }
+        if (gameState.ended) return;
 
         // --- Hotseat: show pass-device screen before next player takes over ---
         if (isHotseatMode && nextPlayer && nextPlayer.userId !== beforeUserId) {
@@ -1442,8 +1444,15 @@ async function performGameAction(type, payload = {}) {
                 expectedVersion: currentGame.state_version
             })
         });
-        await applyGameUpdate(result.game, { force: true });
-        showLiquidationSummaryFromEvents(result.events || []);
+        const events = result.events || [];
+        const sequenceWinnerAfterLiquidation = !!result.game?.game_state?.ended && hasLiquidationEvent(events);
+        await applyGameUpdate(result.game, { force: true, suppressWinner: sequenceWinnerAfterLiquidation });
+        const liquidationShown = showLiquidationSummaryFromEvents(events);
+        if (sequenceWinnerAfterLiquidation && liquidationShown) {
+            pendingWinnerStateAfterLiquidation = result.game.game_state;
+        } else if (sequenceWinnerAfterLiquidation) {
+            showWinnerFromState(result.game.game_state, winnerReasonFromState(result.game.game_state));
+        }
         return result;
     } catch (error) {
         if (error.status === 409) {
@@ -1492,9 +1501,17 @@ function showWinnerFromState(gameState, reason) {
     document.getElementById('winnerModal').style.display = 'flex';
 }
 
+function winnerReasonFromState(gameState) {
+    return gameState?.gameLog?.length ? gameState.gameLog[gameState.gameLog.length - 1].message : 'Game over';
+}
+
+function hasLiquidationEvent(events) {
+    return (events || []).some(event => event.type === 'bankruptcy_liquidation');
+}
+
 function showLiquidationSummaryFromEvents(events) {
     const liquidationEvent = (events || []).find(event => event.type === 'bankruptcy_liquidation');
-    if (!liquidationEvent) return;
+    if (!liquidationEvent) return false;
     const bankruptcyEvent = (events || []).find(event => event.type === 'bankruptcy');
     const data = liquidationEvent.data || {};
     const destination = data.assetDestinationName || 'the Bank';
@@ -1521,6 +1538,7 @@ function showLiquidationSummaryFromEvents(events) {
         </div>
     `).join('');
     document.getElementById('liquidationModal').style.display = 'flex';
+    return true;
 }
 
 function formatSharePositions(positions, transferred = false) {
@@ -1548,6 +1566,11 @@ async function logGameEvent(eventType, eventData) {
 // Modal controls
 function closeModal(modalId) {
     document.getElementById(modalId).style.display = 'none';
+    if (modalId === 'liquidationModal' && pendingWinnerStateAfterLiquidation) {
+        const winnerState = pendingWinnerStateAfterLiquidation;
+        pendingWinnerStateAfterLiquidation = null;
+        showWinnerFromState(winnerState, winnerReasonFromState(winnerState));
+    }
 }
 
 // Tab navigation
