@@ -6,6 +6,7 @@ let currentUser = null;
 let gameChannel = null;
 let currentPlayerData = null;
 let pendingWinnerStateAfterLiquidation = null;
+let gameActionInFlight = false;
 
 // Hotseat mode (same-device local play)
 let isHotseatMode = false;
@@ -810,7 +811,7 @@ async function openBuyPropertyModal() {
         selectedPropertyId = null;
         document.getElementById('availableProperties').innerHTML =
             '<p style="color:#c0392b;padding:12px;">You must land on a property square to buy it.</p>';
-        document.getElementById('buyPropertyModal').style.display = 'flex';
+        openModal('buyPropertyModal');
         return;
     }
 
@@ -820,7 +821,7 @@ async function openBuyPropertyModal() {
         selectedPropertyId = null;
         document.getElementById('availableProperties').innerHTML =
             '<p style="color:#c0392b;padding:12px;">This property is already owned.</p>';
-        document.getElementById('buyPropertyModal').style.display = 'flex';
+        openModal('buyPropertyModal');
         return;
     }
 
@@ -836,7 +837,7 @@ async function openBuyPropertyModal() {
     document.getElementById('purchasePrice').value = property.price;
     document.getElementById('purchasePriceDisplay').textContent = `$${Number(property.price).toFixed(2)}`;
     document.getElementById('availableProperties').innerHTML = propertiesHtml;
-    document.getElementById('buyPropertyModal').style.display = 'flex';
+    openModal('buyPropertyModal');
 }
 
 let selectedPropertyId = null;
@@ -942,7 +943,7 @@ async function openIPOModal() {
     `).join('');
 
     document.getElementById('ipoAssets').innerHTML = assetsHtml;
-    document.getElementById('ipoModal').style.display = 'flex';
+    openModal('ipoModal');
 }
 
 async function createIPO() {
@@ -995,7 +996,7 @@ async function openDebtModal() {
 
     document.getElementById('debtToSettle').innerHTML = debtsHtml || '<option value="">No debts to settle</option>';
 
-    document.getElementById('debtModal').style.display = 'flex';
+    openModal('debtModal');
 }
 
 function debtIssuerOptionsHtml() {
@@ -1187,7 +1188,7 @@ async function openCorporationModal() {
     }).join('');
 
     document.getElementById('corporationList').innerHTML = corporationsHtml || '<p>No corporations created yet</p>';
-    document.getElementById('corporationModal').style.display = 'flex';
+    openModal('corporationModal');
 }
 
 function renderChairmanGovernance(corp) {
@@ -1434,6 +1435,11 @@ async function hostResumeGame() {
 }
 
 async function performGameAction(type, payload = {}) {
+    if (gameActionInFlight) return null;
+
+    gameActionInFlight = true;
+    setGameActionUiBusy(true);
+
     try {
         const result = await apiFetch(`/games/${currentGame.id}/actions`, {
             method: 'POST',
@@ -1461,7 +1467,29 @@ async function performGameAction(type, payload = {}) {
             return null;
         }
         throw error;
+    } finally {
+        gameActionInFlight = false;
+        setGameActionUiBusy(false);
     }
+}
+
+function setGameActionUiBusy(isBusy) {
+    document.querySelectorAll('button').forEach(button => {
+        if (isBusy) {
+            if (!button.dataset.preActionDisabled) {
+                button.dataset.preActionDisabled = button.disabled ? 'true' : 'false';
+            }
+            button.disabled = true;
+            button.classList.add('game-action-busy');
+            return;
+        }
+
+        if (button.dataset.preActionDisabled !== undefined) {
+            button.disabled = button.dataset.preActionDisabled === 'true';
+            delete button.dataset.preActionDisabled;
+            button.classList.remove('game-action-busy');
+        }
+    });
 }
 
 async function refreshCurrentGame() {
@@ -1498,7 +1526,7 @@ function showWinnerFromState(gameState, reason) {
     document.getElementById('winnerName').textContent = winner ? winner.name : 'Game Over';
     document.getElementById('winnerReason').textContent = reason || '';
     document.getElementById('finalStandings').innerHTML = standingsHtml;
-    document.getElementById('winnerModal').style.display = 'flex';
+    openModal('winnerModal');
 }
 
 function winnerReasonFromState(gameState) {
@@ -1537,7 +1565,7 @@ function showLiquidationSummaryFromEvents(events) {
             <strong>${escapeHtml(value)}</strong>
         </div>
     `).join('');
-    document.getElementById('liquidationModal').style.display = 'flex';
+    openModal('liquidationModal');
     return true;
 }
 
@@ -1564,8 +1592,19 @@ async function logGameEvent(eventType, eventData) {
 }
 
 // Modal controls
+function openModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+    modal.classList.add('active');
+    modal.style.display = 'flex';
+}
+
 function closeModal(modalId) {
-    document.getElementById(modalId).style.display = 'none';
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.remove('active');
+        modal.style.display = 'none';
+    }
     if (modalId === 'liquidationModal' && pendingWinnerStateAfterLiquidation) {
         const winnerState = pendingWinnerStateAfterLiquidation;
         pendingWinnerStateAfterLiquidation = null;
@@ -2135,7 +2174,7 @@ function handleCardDraw(deckType, gameState, activePlayerIndex) {
     document.getElementById('cardModalHeader').textContent = isChance ? 'Chance' : 'Community Chest';
     document.getElementById('cardModalText').textContent = card.text;
     document.getElementById('cardModalEffect').textContent = 'Applied: ' + message;
-    document.getElementById('cardModal').style.display = 'flex';
+    openModal('cardModal');
 
     // Log to persistent game log
     const playerName = gameState.players[activePlayerIndex] ? gameState.players[activePlayerIndex].name : 'Unknown';
@@ -2162,7 +2201,7 @@ function showRentPrompt(square, property, owner, amount) {
     document.getElementById('rentModalCashAfter').textContent =
         `Your cash: $${myPlayer ? Math.round(myPlayer.cash) : '?'} → $${Math.round(cashAfter)} after payment`;
     document.getElementById('rentPayBtn').textContent = `Pay $${amount}`;
-    document.getElementById('rentModal').style.display = 'flex';
+    openModal('rentModal');
 }
 
 function showTaxPrompt(amount, squareName) {
@@ -2177,7 +2216,7 @@ function showTaxPrompt(amount, squareName) {
     document.getElementById('rentModalCashAfter').textContent =
         `Your cash: $${myPlayer ? Math.round(myPlayer.cash) : '?'} → $${Math.round(cashAfter)} after payment`;
     document.getElementById('rentPayBtn').textContent = `Pay $${amount}`;
-    document.getElementById('rentModal').style.display = 'flex';
+    openModal('rentModal');
 }
 
 async function confirmRentPayment() {
@@ -2244,7 +2283,7 @@ function openHouseModal() {
     };
 
     renderHouseModal();
-    document.getElementById('houseModal').style.display = 'flex';
+    openModal('houseModal');
 }
 
 async function confirmHousePurchase() {

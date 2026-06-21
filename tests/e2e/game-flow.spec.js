@@ -103,6 +103,37 @@ test.describe('Game flow', () => {
         await expect(rollBtn).toBeVisible({ timeout: 5000 });
     });
 
+    test('duplicate game action clicks are ignored while save is in flight', async ({ page }) => {
+        await loginPage(page, setup.hostToken);
+        await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
+        await page.waitForLoadState('domcontentloaded');
+        await expect(page.getByRole('button', { name: /Roll Dice/i })).toBeVisible({ timeout: 5000 });
+
+        let actionRequests = 0;
+        await page.route('**/api/games/*/actions', async route => {
+            actionRequests += 1;
+            await new Promise(resolve => setTimeout(resolve, 250));
+            await route.continue();
+        });
+
+        const dialogs = [];
+        page.on('dialog', async dialog => {
+            dialogs.push(dialog.message());
+            await dialog.accept();
+        });
+
+        await page.evaluate(() => {
+            window.__E2E_NEXT_DICE = [1, 2];
+            window.rollDiceAndMove();
+            window.rollDiceAndMove();
+        });
+
+        await expect(page.locator('.recent-log')).toContainText(/rolled/i, { timeout: 5000 });
+        await expect.poll(() => actionRequests).toBe(1);
+        expect(actionRequests).toBe(1);
+        expect(dialogs).toEqual([]);
+    });
+
     test('non-current player does not see Roll Dice button', async ({ page }) => {
         await loginPage(page, setup.guestToken);
         await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
@@ -152,5 +183,47 @@ test.describe('Game flow — multiplayer real-time', () => {
         // Both player names should be visible
         await expect(page.locator('body')).toContainText('Alice', { timeout: 5000 });
         await expect(page.locator('body')).toContainText('Bob', { timeout: 5000 });
+    });
+
+    test('host end-game modal is centered in the viewport', async ({ page, request }) => {
+        const setup = await setupGame(request);
+
+        await loginPage(page, setup.hostToken);
+        await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
+        await page.waitForLoadState('domcontentloaded');
+
+        page.once('dialog', dialog => dialog.accept());
+        await page.getByRole('button', { name: /End Game/i }).click();
+        const modalContent = page.locator('#winnerModal .modal-content');
+        await expect(modalContent).toBeVisible({ timeout: 5000 });
+
+        const box = await modalContent.boundingBox();
+        const viewport = page.viewportSize();
+        expect(box).not.toBeNull();
+        expect(viewport).not.toBeNull();
+        if (box && viewport) {
+            const modalCenter = box.x + box.width / 2;
+            expect(Math.abs(modalCenter - viewport.width / 2)).toBeLessThan(24);
+        }
+    });
+
+    test('same player can use two tabs without losing live game state', async ({ page, request }) => {
+        const setup = await setupGame(request);
+
+        await loginPage(page, setup.hostToken);
+        await page.goto(`${BASE}/game.html?room=${setup.room.id}`);
+        await page.waitForLoadState('domcontentloaded');
+        await expect(page.getByRole('button', { name: /Roll Dice/i })).toBeVisible({ timeout: 5000 });
+
+        const secondTab = await page.context().newPage();
+        await secondTab.goto(`${BASE}/game.html?room=${setup.room.id}`);
+        await secondTab.waitForLoadState('domcontentloaded');
+        await expect(secondTab.getByRole('button', { name: /Roll Dice/i })).toBeVisible({ timeout: 5000 });
+
+        await page.evaluate(() => {
+            window.__E2E_NEXT_DICE = [1, 2];
+        });
+        await page.getByRole('button', { name: /Roll Dice/i }).click();
+        await expect(secondTab.locator('#gameContent')).toContainText(/rolled/i, { timeout: 10000 });
     });
 });

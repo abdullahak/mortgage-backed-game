@@ -84,6 +84,7 @@ async function joinAsGuest() {
     const playerName = document.getElementById('guest-player-name').value.trim();
     const errorEl = document.getElementById('guest-join-error');
     const btn = document.getElementById('guest-join-btn');
+    let createdAnonymousSession = false;
 
     if (!playerName) {
         errorEl.textContent = 'Please enter your player name';
@@ -100,6 +101,7 @@ async function joinAsGuest() {
         const anonData = await apiFetch('/auth/anonymous', { method: 'POST' });
         localStorage.setItem('auth_token', anonData.token);
         currentUser = anonData.user;
+        createdAnonymousSession = true;
 
         // Join room by code
         const room = await joinRoomByCode(roomCode, playerName);
@@ -122,12 +124,24 @@ async function joinAsGuest() {
         checkGameStatusById(room.id);
 
     } catch (error) {
-        console.error('Error joining room:', error);
+        if (createdAnonymousSession) {
+            localStorage.removeItem('auth_token');
+            currentUser = null;
+        }
+        if (isExpectedGuestJoinError(error)) {
+            console.warn('Could not join room:', error.message || error);
+        } else {
+            console.error('Error joining room:', error);
+        }
         errorEl.textContent = error.message || 'Could not join room. Check your code and try again.';
         errorEl.classList.add('active');
         btn.disabled = false;
         btn.textContent = 'Join Game';
     }
+}
+
+function isExpectedGuestJoinError(error) {
+    return error && [400, 403, 404].includes(error.status);
 }
 
 // Load room data (uses module-level roomId)
