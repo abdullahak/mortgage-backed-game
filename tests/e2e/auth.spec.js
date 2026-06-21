@@ -1,7 +1,6 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
-
-const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
+const { BASE } = require('./helpers');
 
 test.describe('Auth flow', () => {
     test.beforeEach(async ({ page }) => {

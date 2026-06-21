@@ -6,6 +6,7 @@ const http = require('http');
 const net = require('net');
 const path = require('path');
 const { spawn } = require('child_process');
+const { createStaticProxyServer } = require('./devServer');
 
 const ROOT = path.resolve(__dirname, '..');
 const DEV_DATA_DIR = '/mnt/ssd/dev-data/mortgage-backed';
@@ -77,7 +78,15 @@ async function main() {
     });
 
     await waitForHealth(apiPort);
-    webServer = await startStaticProxyServer({ root: ROOT, webPort, apiPort });
+    webServer = createStaticProxyServer({
+        root: ROOT,
+        backendOrigin: `http://127.0.0.1:${apiPort}`,
+        noStore: true,
+    });
+    await new Promise((resolve, reject) => {
+        webServer.on('error', reject);
+        webServer.listen(webPort, '0.0.0.0', resolve);
+    });
 
     console.log(`Real-player E2E dev web: ${baseURL}`);
     console.log(`Real-player E2E dev API: http://127.0.0.1:${apiPort}/api`);
@@ -106,92 +115,6 @@ function runPlaywright() {
         });
         child.on('exit', (code) => resolve(code || 0));
     });
-}
-
-function startStaticProxyServer({ root, webPort, apiPort }) {
-    const server = http.createServer((req, res) => {
-        if (req.url.startsWith('/api/') || req.url.startsWith('/socket.io/')) {
-            proxyHttp(req, res, apiPort);
-            return;
-        }
-        if (req.url === '/favicon.ico') {
-            res.writeHead(204, { 'Cache-Control': 'no-store' });
-            res.end();
-            return;
-        }
-
-        const url = new URL(req.url, `http://127.0.0.1:${webPort}`);
-        const pathname = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
-        const filePath = path.normalize(path.join(root, pathname));
-
-        if (!filePath.startsWith(root)) {
-            res.writeHead(403);
-            res.end('Forbidden');
-            return;
-        }
-
-        fs.readFile(filePath, (err, body) => {
-            if (err) {
-                res.writeHead(404);
-                res.end('Not found');
-                return;
-            }
-            res.writeHead(200, {
-                'Content-Type': contentType(filePath),
-                'Cache-Control': 'no-store',
-            });
-            res.end(body);
-        });
-    });
-
-    server.on('upgrade', (req, socket, head) => {
-        if (!req.url.startsWith('/socket.io/')) {
-            socket.destroy();
-            return;
-        }
-        proxyWebSocket(req, socket, head, apiPort);
-    });
-
-    return new Promise((resolve, reject) => {
-        server.on('error', reject);
-        server.listen(webPort, '0.0.0.0', () => resolve(server));
-    });
-}
-
-function proxyHttp(req, res, apiPort) {
-    const proxyReq = http.request({
-        hostname: '127.0.0.1',
-        port: apiPort,
-        path: req.url,
-        method: req.method,
-        headers: req.headers,
-    }, (proxyRes) => {
-        res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
-        proxyRes.pipe(res);
-    });
-    proxyReq.on('error', (err) => {
-        res.writeHead(502);
-        res.end(`Proxy error: ${err.message}`);
-    });
-    req.pipe(proxyReq);
-}
-
-function proxyWebSocket(req, socket, head, apiPort) {
-    const upstream = net.connect(apiPort, '127.0.0.1', () => {
-        upstream.write(formatUpgradeRequest(req));
-        if (head && head.length) upstream.write(head);
-        upstream.pipe(socket);
-        socket.pipe(upstream);
-    });
-    socket.on('error', () => upstream.destroy());
-    upstream.on('error', () => socket.destroy());
-}
-
-function formatUpgradeRequest(req) {
-    const headers = Object.entries(req.headers)
-        .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`)
-        .join('\r\n');
-    return `${req.method} ${req.url} HTTP/${req.httpVersion}\r\n${headers}\r\n\r\n`;
 }
 
 async function waitForHealth(port) {
@@ -253,20 +176,6 @@ async function cleanup() {
             });
         });
     }
-}
-
-function contentType(filePath) {
-    const ext = path.extname(filePath).toLowerCase();
-    return {
-        '.html': 'text/html; charset=utf-8',
-        '.css': 'text/css; charset=utf-8',
-        '.js': 'text/javascript; charset=utf-8',
-        '.json': 'application/json; charset=utf-8',
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.svg': 'image/svg+xml',
-    }[ext] || 'application/octet-stream';
 }
 
 function parseArgs(argv) {

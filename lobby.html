@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lobby - Mortgage Backed Monopoly</title>
-    <link rel="stylesheet" href="src/css/style.css?v=9">
+    <link rel="stylesheet" href="src/css/style.css?v=10">
 </head>
 <body>
     <div class="container">
@@ -13,7 +13,7 @@
             <p><em>If they did it in 2008, it's fair game</em></p>
             <div class="user-info">
                 <span id="user-email"></span>
-                <button class="btn btn-secondary btn-sm" onclick="handleLogout()">Logout</button>
+                <button id="logout-btn" class="btn btn-secondary btn-sm">Logout</button>
             </div>
         </div>
 
@@ -22,7 +22,7 @@
                 <h2>Game Lobby</h2>
 
                 <div class="lobby-actions">
-                    <button class="btn btn-primary" onclick="showCreateRoomModal()">Create New Game</button>
+                    <button id="show-create-room-btn" class="btn btn-primary">Create New Game</button>
                 </div>
 
                 <div class="rooms-section">
@@ -55,15 +55,14 @@
                 <input type="text" id="host-player-name" placeholder="Your in-game name" required>
             </div>
             <div style="text-align: center;">
-                <button class="btn btn-success" onclick="createRoom()">Create Game</button>
-                <button class="btn btn-secondary" onclick="closeModal('createRoomModal')">Cancel</button>
+                <button id="create-room-btn" class="btn btn-success">Create Game</button>
+                <button id="cancel-create-room-btn" class="btn btn-secondary">Cancel</button>
             </div>
         </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="src/js/config.js?v=4"></script>
-    <script src="src/js/supabase.js?v=4"></script>
-    <script src="src/js/lobby.js?v=4"></script>
+    <script src="src/js/api.js?v=4"></script>
+    <script src="src/js/lobby.js?v=7"></script>
 </body>
 </html>

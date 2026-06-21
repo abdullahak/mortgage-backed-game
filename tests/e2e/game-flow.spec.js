@@ -1,9 +1,6 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
-const { loginPage } = require('./helpers');
-
-const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
-const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
+const { BASE, BASE_API, loginPage, playerState } = require('./helpers');
 
 /**
  * Helper to start a game with 2 players and navigate to game.html.
@@ -31,8 +28,8 @@ async function setupGame(request) {
     const gameState = {
         currentPlayerIndex: 0,
         players: [
-            { userId: h.user.id, name: 'Alice', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
-            { userId: g.user.id, name: 'Bob',   cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+            playerState(h.user.id, 'Alice'),
+            playerState(g.user.id, 'Bob'),
         ],
         properties: [],
         corporations: [],
@@ -122,11 +119,11 @@ test.describe('Game flow', () => {
             await dialog.accept();
         });
 
-        await page.evaluate(() => {
-            window.__E2E_NEXT_DICE = [1, 2];
-            window.rollDiceAndMove();
-            window.rollDiceAndMove();
-        });
+        const rollButton = page.locator('#game.section.active button[data-game-action="roll-dice"]').first();
+        await expect(rollButton).toBeVisible({ timeout: 5000 });
+        await page.evaluate(() => { window.__E2E_NEXT_DICE = [1, 2]; });
+        await rollButton.dispatchEvent('click');
+        await rollButton.dispatchEvent('click');
 
         await expect(page.locator('.recent-log')).toContainText(/rolled/i, { timeout: 5000 });
         await expect.poll(() => actionRequests).toBe(1);

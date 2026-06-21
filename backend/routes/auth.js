@@ -7,6 +7,7 @@ const { sendEmail } = require('../mailer');
 const db = require('../db');
 const { getConfig } = require('../config');
 const { createRateLimiter, getRequestActorKey } = require('../rateLimit');
+const { normalizeEmail, isValidEmail } = require('../normalizers');
 
 const config = getConfig();
 const JWT_SECRET = config.jwtSecret;
@@ -17,13 +18,12 @@ const authRateLimit = createRateLimiter({
     name: 'auth',
     ...config.rateLimits.auth,
     keyGenerator: req => {
-        const email = String(req.body?.email || '').trim().toLowerCase();
+        const email = normalizeEmail(req.body?.email);
         const emailKey = email ? `:email:${email}` : '';
         return `${getRequestActorKey(req)}:${req.method}:${req.path}${emailKey}`;
     },
 });
 
-// Middleware: verify JWT and attach user
 function requireAuth(req, res, next) {
     const header = req.headers.authorization;
     if (!header || !header.startsWith('Bearer ')) {
@@ -38,19 +38,16 @@ function requireAuth(req, res, next) {
     }
 }
 
-// Create a JWT for a user
 function makeToken(userId) {
     return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
 }
 
-
 // POST /api/auth/send-otp
 router.post('/send-otp', authRateLimit, async (req, res) => {
-    const { email } = req.body;
-    if (!email || !email.includes('@')) {
+    const normalizedEmail = normalizeEmail(req.body.email);
+    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
         return res.status(400).json({ error: 'Valid email required' });
     }
-    const normalizedEmail = email.toLowerCase();
     if (isRateLimited(otpSendLimits, `${req.ip}:${normalizedEmail}`, 5, 15 * 60 * 1000)) {
         return res.status(429).json({ error: 'Too many code requests' });
     }
@@ -70,14 +67,14 @@ router.post('/send-otp', authRateLimit, async (req, res) => {
     if (process.env.NODE_ENV !== 'test') {
         try {
             await sendEmail(
-                email,
+                normalizedEmail,
                 'Your Mortgage Backed Monopoly login code',
                 `Your verification code is: ${code}\n\nValid for 10 minutes.`,
                 `<p>Your verification code is: <strong>${code}</strong></p><p>Valid for 10 minutes.</p>`
             );
         } catch (err) {
             console.error('Email send error:', err);
-            if (config.otpLogEnabled) console.log(`\nOTP for ${email}: ${code}\n`);
+            if (config.otpLogEnabled) console.log(`\nOTP for ${normalizedEmail}: ${code}\n`);
         }
     }
 
@@ -86,12 +83,12 @@ router.post('/send-otp', authRateLimit, async (req, res) => {
 
 // POST /api/auth/verify-otp
 router.post('/verify-otp', authRateLimit, (req, res) => {
-    const { email, token } = req.body;
-    if (!email || !token) {
+    const { token } = req.body;
+    const normalizedEmail = normalizeEmail(req.body.email);
+    if (!normalizedEmail || !token) {
         return res.status(400).json({ error: 'email and token required' });
     }
 
-    const normalizedEmail = email.toLowerCase();
     if (isRateLimited(otpVerifyLimits, `${req.ip}:${normalizedEmail}`, 10, 15 * 60 * 1000)) {
         return res.status(429).json({ error: 'Too many verification attempts' });
     }
@@ -134,7 +131,6 @@ router.get('/me', requireAuth, (req, res) => {
     res.json(user);
 });
 
-// POST /api/auth/signout
 router.post('/signout', requireAuth, (req, res) => {
     // JWTs are stateless; nothing to delete. Client clears the token.
     res.json({ ok: true });

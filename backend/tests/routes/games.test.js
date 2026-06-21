@@ -4,6 +4,7 @@ process.env.DB_PATH = ':memory:';
 process.env.JWT_SECRET = 'test-secret';
 
 const request = require('supertest');
+const { addRoomMemberFixture, createRoomFixture, createUserFixture, resetTestDb } = require('../helpers/fixtures');
 
 let app, db;
 let user1, user2, room;
@@ -16,8 +17,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-    db.exec(`DELETE FROM game_events; DELETE FROM games; DELETE FROM room_members; DELETE FROM rooms; DELETE FROM otps; DELETE FROM users;`);
-    const { createUserFixture, createRoomFixture } = require('../helpers/fixtures');
+    resetTestDb(db);
     user1 = createUserFixture(db);
     user2 = createUserFixture(db);
     room = createRoomFixture(db, user1.id, { inviteCode: 'ROOM01', maxPlayers: 4 });
@@ -183,7 +183,6 @@ describe('GET /api/games/by-room/:roomId', () => {
     });
 
     test('404 if no game for room', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const emptyRoom = createRoomFixture(db, user1.id, { inviteCode: 'EMPTY1' });
         const res = await request(app)
             .get(`/api/games/by-room/${emptyRoom.id}`)
@@ -277,7 +276,6 @@ describe('POST /api/games/:id/actions', () => {
     });
 
     test('400 rejects end_turn before current player rolls', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const unrolledRoom = createRoomFixture(db, user1.id, { inviteCode: 'UNROLL', maxPlayers: 4 });
         const unrolledGame = await request(app)
             .post('/api/games')
@@ -325,7 +323,7 @@ describe('POST /api/games/:id/actions', () => {
     });
 
     test('non-host cannot pause the game', async () => {
-        addRoomMember(room.id, user2.id, 'Bob');
+        addRoomMemberFixture(db, room.id, user2.id, 'Bob');
 
         const res = await request(app)
             .post(`/api/games/${gameId}/actions`)
@@ -392,7 +390,6 @@ describe('POST /api/games/:id/actions', () => {
     });
 
     test('403 for authenticated user outside the room', async () => {
-        const { createUserFixture } = require('../helpers/fixtures');
         const outsider = createUserFixture(db);
 
         const res = await request(app)
@@ -491,7 +488,7 @@ describe('POST /api/games/:id/actions', () => {
     });
 
     test('majority shareholder can change corporation chairman directly', async () => {
-        addRoomMember(room.id, user2.id, 'Bob');
+        addRoomMemberFixture(db, room.id, user2.id, 'Bob');
         const state = minimalGameState();
         state.corporations = [governedCorp({
             chairmanId: user1.id,
@@ -513,7 +510,7 @@ describe('POST /api/games/:id/actions', () => {
     });
 
     test('half ownership cannot remove existing chairman without pooled majority vote', async () => {
-        addRoomMember(room.id, user2.id, 'Bob');
+        addRoomMemberFixture(db, room.id, user2.id, 'Bob');
         const state = minimalGameState();
         state.corporations = [governedCorp({
             chairmanId: user1.id,
@@ -532,10 +529,9 @@ describe('POST /api/games/:id/actions', () => {
     });
 
     test('shareholders can pool shares through a vote to change chairman', async () => {
-        const { createUserFixture } = require('../helpers/fixtures');
         const user3 = createUserFixture(db);
-        addRoomMember(room.id, user2.id, 'Bob');
-        addRoomMember(room.id, user3.id, 'Carol');
+        addRoomMemberFixture(db, room.id, user2.id, 'Bob');
+        addRoomMemberFixture(db, room.id, user3.id, 'Carol');
         const state = minimalGameState();
         state.players.push({ userId: user3.id, name: 'Carol', cash: 1500, position: 0, bankrupt: false, inJail: false, properties: [], corporations: [], debts: [] });
         state.corporations = [governedCorp({
@@ -574,82 +570,6 @@ describe('POST /api/games/:id/actions', () => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/games/:id/events
-// ---------------------------------------------------------------------------
-describe('POST /api/games/:id/events', () => {
-    let gameId;
-
-    beforeEach(async () => {
-        const res = await request(app)
-            .post('/api/games')
-            .set('Authorization', `Bearer ${user1.token}`)
-            .send({ room_id: room.id, game_state: minimalGameState() });
-        gameId = res.body.id;
-    });
-
-    test('201/200 logs event successfully', async () => {
-        const res = await request(app)
-            .post(`/api/games/${gameId}/events`)
-            .set('Authorization', `Bearer ${user1.token}`)
-            .send({ event_type: 'dice_roll', event_data: { roll: [3, 4] } });
-
-        expect([200, 201]).toContain(res.status);
-    });
-
-    test('400 with missing event_type', async () => {
-        const res = await request(app)
-            .post(`/api/games/${gameId}/events`)
-            .set('Authorization', `Bearer ${user1.token}`)
-            .send({ event_data: {} });
-
-        expect(res.status).toBe(400);
-    });
-
-    test('401 without auth', async () => {
-        const res = await request(app)
-            .post(`/api/games/${gameId}/events`)
-            .send({ event_type: 'dice_roll' });
-
-        expect(res.status).toBe(401);
-    });
-
-    test('event is stored in DB', async () => {
-        await request(app)
-            .post(`/api/games/${gameId}/events`)
-            .set('Authorization', `Bearer ${user1.token}`)
-            .send({ event_type: 'test_event', event_data: { foo: 'bar' } });
-
-        const event = db.prepare(`SELECT * FROM game_events WHERE game_id = ? AND event_type = 'test_event'`).get(gameId);
-        expect(event).toBeTruthy();
-        expect(JSON.parse(event.event_data)).toEqual({ foo: 'bar' });
-    });
-
-    test('403 for authenticated user outside the room', async () => {
-        const { createUserFixture } = require('../helpers/fixtures');
-        const outsider = createUserFixture(db);
-
-        const res = await request(app)
-            .post(`/api/games/${gameId}/events`)
-            .set('Authorization', `Bearer ${outsider.token}`)
-            .send({ event_type: 'test_event' });
-
-        expect(res.status).toBe(403);
-    });
-
-    test('multiple events can be logged in sequence', async () => {
-        await request(app).post(`/api/games/${gameId}/events`)
-            .set('Authorization', `Bearer ${user1.token}`)
-            .send({ event_type: 'event1' });
-        await request(app).post(`/api/games/${gameId}/events`)
-            .set('Authorization', `Bearer ${user1.token}`)
-            .send({ event_type: 'event2' });
-
-        const events = db.prepare(`SELECT * FROM game_events WHERE game_id = ?`).all(gameId);
-        expect(events.length).toBeGreaterThanOrEqual(2);
-    });
-});
-
-// ---------------------------------------------------------------------------
 // GET /api/games/:id/events
 // ---------------------------------------------------------------------------
 describe('GET /api/games/:id/events', () => {
@@ -679,9 +599,10 @@ describe('GET /api/games/:id/events', () => {
     });
 
     test('event_data is parsed JSON', async () => {
-        await request(app).post(`/api/games/${gameId}/events`)
-            .set('Authorization', `Bearer ${user1.token}`)
-            .send({ event_type: 'buy', event_data: { property: 'prop-0', price: 60 } });
+        db.prepare(`
+            INSERT INTO game_events (id, game_id, player_id, event_type, event_data)
+            VALUES (?, ?, ?, ?, ?)
+        `).run('event-buy', gameId, user1.id, 'buy', JSON.stringify({ property: 'prop-0', price: 60 }));
 
         const res = await request(app)
             .get(`/api/games/${gameId}/events`)
@@ -719,7 +640,6 @@ describe('Game state integrity', () => {
     });
 
     test('unicode player names in game_state handled correctly', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const unicodeRoom = createRoomFixture(db, user1.id, { inviteCode: 'UNCD01' });
 
         const unicodeState = {
@@ -741,13 +661,6 @@ describe('Game state integrity', () => {
 
 function uuidForTest() {
     return `test-${Math.random().toString(16).slice(2)}-${Date.now()}`;
-}
-
-function addRoomMember(roomId, userId, playerName) {
-    db.prepare(`
-        INSERT INTO room_members (id, room_id, user_id, player_name)
-        VALUES (?, ?, ?, ?)
-    `).run(uuidForTest(), roomId, userId, playerName);
 }
 
 function governedCorp(overrides = {}) {

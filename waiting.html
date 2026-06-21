@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Waiting Room - Mortgage Backed Monopoly</title>
-    <link rel="stylesheet" href="src/css/style.css?v=9">
+    <link rel="stylesheet" href="src/css/style.css?v=10">
 </head>
 <body>
     <div class="container">
@@ -13,7 +13,7 @@
             <p><em>If they did it in 2008, it's fair game</em></p>
             <div class="user-info">
                 <span id="user-email"></span>
-                <button id="leave-room-btn" class="btn btn-secondary btn-sm" onclick="leaveRoom()" style="display:none;">Leave Room</button>
+                <button id="leave-room-btn" class="btn btn-secondary btn-sm" style="display:none;">Leave Room</button>
             </div>
         </div>
 
@@ -34,7 +34,7 @@
                     <input type="text" id="guest-player-name" placeholder="Enter your name" required>
                 </div>
                 <div id="guest-join-error" class="error-message"></div>
-                <button id="guest-join-btn" class="btn btn-primary" onclick="joinAsGuest()">Join Game</button>
+                <button id="guest-join-btn" class="btn btn-primary">Join Game</button>
                 <p style="margin-top: 16px; text-align: center;">
                     <a href="index.html" style="color: #7f8c8d; font-size: 0.9em;">Back to home</a>
                 </p>
@@ -56,7 +56,7 @@
                 <div class="invite-code-display">
                     <h3>Share this code with your friends:</h3>
                     <div class="invite-code-large" id="invite-code">------</div>
-                    <button class="btn btn-sm" onclick="copyInviteCode()">Copy Code</button>
+                    <button id="copy-invite-code-btn" class="btn btn-sm">Copy Code</button>
                 </div>
 
                 <!-- Players List -->
@@ -73,7 +73,7 @@
                 <!-- Host Controls -->
                 <div class="host-controls" id="host-controls" style="display: none;">
                     <div style="text-align: center; margin-top: 30px;">
-                        <button class="btn btn-success btn-large" onclick="startGameFromLobby()" id="start-game-btn">
+                        <button class="btn btn-success btn-large" id="start-game-btn">
                             Start Game
                         </button>
                         <p id="start-help-text" style="margin-top: 10px; color: #7f8c8d;">
@@ -87,7 +87,7 @@
                         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                             <input type="email" id="invite-email" placeholder="friend@email.com"
                                 style="flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px;">
-                            <button class="btn btn-secondary" onclick="sendInviteEmail()">Send Invite</button>
+                            <button id="send-invite-btn" class="btn btn-secondary">Send Invite</button>
                         </div>
                         <div id="invite-status" style="margin-top: 8px; font-size: 0.85em; color: #7f8c8d;"></div>
                     </div>
@@ -106,10 +106,7 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="src/js/config.js?v=4"></script>
-    <script src="src/js/supabase.js?v=8"></script>
-    <script src="src/js/game-data.js?v=1"></script>
-    <script src="src/js/board.js?v=5"></script>
-    <script src="src/js/waiting.js?v=8"></script>
+    <script src="src/js/api.js?v=4"></script>
+    <script src="src/js/waiting.js?v=11"></script>
 </body>
 </html>

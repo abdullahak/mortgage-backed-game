@@ -74,7 +74,6 @@ function getConfig() {
             auth: buildRateLimitConfig('AUTH', rateLimitEnabled, { max: 120, windowMs: 15 * 60 * 1000 }),
             roomCreate: buildRateLimitConfig('ROOM_CREATE', rateLimitEnabled, { max: 12, windowMs: 60 * 60 * 1000 }),
             gameAction: buildRateLimitConfig('GAME_ACTION', rateLimitEnabled, { max: 120, windowMs: 60 * 1000 }),
-            manualEvent: buildRateLimitConfig('MANUAL_EVENT', rateLimitEnabled, { max: 30, windowMs: 60 * 1000 }),
         },
     };
 }

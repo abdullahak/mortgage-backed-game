@@ -25,59 +25,15 @@ const gameActionRateLimit = createRateLimiter({
     ...config.rateLimits.gameAction,
     keyGenerator: req => `${req.params.id}:${getRequestActorKey(req)}`,
 });
-const manualEventRateLimit = createRateLimiter({
-    name: 'manual_event',
-    ...config.rateLimits.manualEvent,
-    keyGenerator: req => `${req.params.id}:${getRequestActorKey(req)}`,
-});
-const TURN_ACTIONS = new Set([
-    'roll_dice',
-    'buy_property',
-    'start_auction',
-    'end_turn',
-    'create_ipo',
-    'buy_shares',
-    'issue_debt',
-    'pay_debt',
-    'buy_houses',
-]);
-const OUT_OF_TURN_ACTIONS = new Set([
-    'place_bid',
-    'pass_auction',
-    'change_chairman',
-    'propose_chairman_vote',
-    'support_chairman_vote',
-    'propose_trade',
-    'accept_trade',
-    'cancel_trade',
-    'trade',
-    'manual_payment',
-]);
-const HOST_ACTIONS = new Set([
-    'host_state_repair',
-    'host_cancel_auction',
-    'host_cancel_trade_offer',
-    'host_pause_game',
-    'host_resume_game',
-    'host_end_game',
-]);
-
 function parseGame(game) {
     const gameState = normalizeState(JSON.parse(game.game_state));
-    return { ...game, game_state: gameState, gameState, stateVersion: game.state_version };
+    return { ...game, game_state: gameState };
 }
 
 function isRoomMember(roomId, userId) {
     return !!db.prepare(`
         SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ?
     `).get(roomId, userId);
-}
-
-function changedPlayerIds(beforeState, afterState) {
-    const afterById = new Map((afterState.players || []).map(player => [player.userId, player]));
-    return (beforeState.players || [])
-        .filter(player => JSON.stringify(player) !== JSON.stringify(afterById.get(player.userId)))
-        .map(player => player.userId);
 }
 
 function validateStateShape(beforeState, afterState) {
@@ -124,37 +80,6 @@ function validateStateShape(beforeState, afterState) {
     return null;
 }
 
-function authorizeStatePatch({ actionType, room, game, beforeState, afterState, userId }) {
-    if (!actionType) return { ok: false, status: 400, error: 'action_type required' };
-
-    const shapeError = validateStateShape(beforeState, afterState);
-    if (shapeError) return { ok: false, status: 400, error: shapeError };
-
-    if (TURN_ACTIONS.has(actionType)) {
-        const currentPlayer = beforeState.players && beforeState.players[beforeState.currentPlayerIndex];
-        if (!currentPlayer || currentPlayer.userId !== userId) {
-            return { ok: false, status: 403, error: 'Not the current player' };
-        }
-        return { ok: true };
-    }
-
-    if (OUT_OF_TURN_ACTIONS.has(actionType)) {
-        const changedIds = changedPlayerIds(beforeState, afterState);
-        if (changedIds.length > 2) return { ok: false, status: 400, error: 'Market action changed too many players' };
-        if (changedIds.length > 0 && !changedIds.includes(userId)) {
-            return { ok: false, status: 403, error: 'Market action must involve the acting player' };
-        }
-        return { ok: true };
-    }
-
-    if (HOST_ACTIONS.has(actionType)) {
-        if (room.host_id !== userId) return { ok: false, status: 403, error: 'Not the host' };
-        return { ok: true };
-    }
-
-    return { ok: false, status: 400, error: 'Unknown action_type' };
-}
-
 function getRoom(roomId) {
     return db.prepare(`SELECT * FROM rooms WHERE id = ?`).get(roomId);
 }
@@ -189,7 +114,6 @@ function requireMember(req, res, next) {
     const game = db.prepare(`SELECT * FROM games WHERE id = ?`).get(req.params.id);
     if (!game) return res.status(404).json({ error: 'Game not found' });
     if (!isRoomMember(game.room_id, req.userId)) return res.status(403).json({ error: 'Not a room member' });
-    req.gameRow = game;
     next();
 }
 
@@ -354,20 +278,6 @@ router.patch('/:id/state', requireAuth, (req, res) => {
     io.to(`room:${game.room_id}`).emit('game:state_update', parseGame(updatedGame));
 
     res.json(parseGame(updatedGame));
-});
-
-// POST /api/games/:id/events — log a game event
-router.post('/:id/events', requireAuth, requireMember, manualEventRateLimit, (req, res) => {
-    const { event_type, event_data } = req.body;
-    if (!event_type) return res.status(400).json({ error: 'event_type required' });
-
-    const eventId = uuidv4();
-    db.prepare(`
-        INSERT INTO game_events (id, game_id, player_id, event_type, event_data)
-        VALUES (?, ?, ?, ?, ?)
-    `).run(eventId, req.params.id, req.userId, event_type, JSON.stringify(event_data || {}));
-
-    res.json({ ok: true });
 });
 
 // GET /api/games/:id/events — get recent events

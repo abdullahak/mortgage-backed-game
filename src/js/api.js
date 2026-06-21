@@ -1,4 +1,6 @@
-// API + real-time helpers (replaces Supabase)
+// API + real-time helpers
+
+window.API_BASE = window.API_BASE || '/api';
 
 // ----------------------------------------------------------------
 // API fetch helper — attaches auth token automatically
@@ -51,14 +53,13 @@ async function requireAuth() {
         window.location.href = 'index.html';
         return null;
     }
-    try {
-        const user = await apiFetch('/auth/me');
-        return user;
-    } catch {
-        localStorage.removeItem('auth_token');
-        window.location.href = 'index.html';
-        return null;
-    }
+
+    const user = await getCurrentUser();
+    if (user) return user;
+
+    localStorage.removeItem('auth_token');
+    window.location.href = 'index.html';
+    return null;
 }
 
 async function getCurrentUser() {
@@ -93,11 +94,15 @@ function getHotseatResumeRooms() {
     }
 }
 
+function normalizeInviteCode(inviteCode) {
+    return String(inviteCode || '').trim().toUpperCase();
+}
+
 function saveHotseatResume(room, tokenRecords) {
     if (!room || !room.invite_code || !Array.isArray(tokenRecords) || tokenRecords.length === 0) return;
 
     const rooms = getHotseatResumeRooms();
-    const code = room.invite_code.toUpperCase();
+    const code = normalizeInviteCode(room.invite_code);
     rooms[code] = {
         roomId: room.id,
         inviteCode: code,
@@ -108,7 +113,7 @@ function saveHotseatResume(room, tokenRecords) {
 }
 
 function getHotseatResumeByCode(inviteCode) {
-    const code = String(inviteCode || '').trim().toUpperCase();
+    const code = normalizeInviteCode(inviteCode);
     if (!code) return null;
 
     const resume = getHotseatResumeRooms()[code];
@@ -119,18 +124,12 @@ function getHotseatResumeByCode(inviteCode) {
 }
 
 function restoreHotseatResume(resume) {
-    if (!resume || !resume.roomId || !Array.isArray(resume.tokens) || resume.tokens.length === 0) {
-        return false;
-    }
-
     sessionStorage.setItem('hotseat_tokens', JSON.stringify(resume.tokens));
     localStorage.setItem('auth_token', resume.tokens[0].token);
     return true;
 }
 
 function restoreHotseatPlayer(resume, userId) {
-    if (!resume || !Array.isArray(resume.tokens)) return false;
-
     const player = resume.tokens.find(record => record.userId === userId);
     if (!player || !player.token) return false;
 
@@ -139,19 +138,11 @@ function restoreHotseatPlayer(resume, userId) {
     return true;
 }
 
-function continueHotseatMode(inviteCode) {
+function continueSavedHotseat(inviteCode, restore) {
     const resume = getHotseatResumeByCode(inviteCode);
-    if (!resume || !restoreHotseatResume(resume)) return false;
+    if (!resume || !restore(resume)) return false;
 
-    window.location.href = `game.html?room=${encodeURIComponent(resume.roomId)}`;
-    return true;
-}
-
-function continueHotseatOnline(inviteCode, userId) {
-    const resume = getHotseatResumeByCode(inviteCode);
-    if (!resume || !restoreHotseatPlayer(resume, userId)) return false;
-
-    window.location.href = `game.html?room=${encodeURIComponent(resume.roomId)}`;
+    navigateToGameRoom(resume.roomId);
     return true;
 }
 
@@ -165,42 +156,15 @@ function renderHotseatResumeOptions(container, inviteCode) {
         return false;
     }
 
-    container.innerHTML = '';
-    container.style.display = 'block';
-
-    const title = document.createElement('h4');
-    title.textContent = 'Continue this saved hotseat game';
-    container.appendChild(title);
-
-    const modeText = document.createElement('p');
-    modeText.className = 'hotseat-resume-hint';
-    modeText.textContent = 'Use local hotseat on this device, or continue online as one player.';
-    container.appendChild(modeText);
-
-    const hotseatButton = document.createElement('button');
-    hotseatButton.type = 'button';
-    hotseatButton.className = 'btn btn-primary hotseat-resume-main';
-    hotseatButton.textContent = 'Continue Hotseat';
-    hotseatButton.addEventListener('click', () => continueHotseatMode(inviteCode));
-    container.appendChild(hotseatButton);
-
-    const playerList = document.createElement('div');
-    playerList.className = 'hotseat-player-options';
-    const playerLabel = document.createElement('p');
-    playerLabel.className = 'hotseat-resume-hint';
-    playerLabel.textContent = 'Continue online as:';
-    playerList.appendChild(playerLabel);
-
-    resume.tokens.forEach(record => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'btn btn-secondary btn-sm hotseat-player-option';
-        button.textContent = record.name || 'Player';
-        button.addEventListener('click', () => continueHotseatOnline(inviteCode, record.userId));
-        playerList.appendChild(button);
+    renderResumeOptions(container, {
+        title: 'Continue this saved hotseat game',
+        hint: 'Use local hotseat on this device, or continue online as one player.',
+        onHotseat: () => continueSavedHotseat(inviteCode, restoreHotseatResume),
+        players: resume.tokens.map(record => ({
+            label: record.name || 'Player',
+            onClick: () => continueSavedHotseat(inviteCode, saved => restoreHotseatPlayer(saved, record.userId)),
+        })),
     });
-
-    container.appendChild(playerList);
     return true;
 }
 
@@ -210,47 +174,60 @@ function renderExistingRoomMemberOptions(container, inviteCode, room) {
     const roomIsClosedToNewMembers = room.status !== 'waiting' || room.room_members.length >= room.max_players;
     if (!roomIsClosedToNewMembers) return false;
 
+    renderResumeOptions(container, {
+        title: 'Continue as an existing player',
+        hint: 'This room is already full. Continue local hotseat, or choose one player for online mode.',
+        onHotseat: () => continueExistingRoomHotseat(inviteCode),
+        players: room.room_members.map(member => ({
+            label: member.player_name || 'Player',
+            onClick: () => continueExistingRoomMember(inviteCode, member.id),
+        })),
+    });
+    return true;
+}
+
+function renderResumeOptions(container, { title, hint, onHotseat, players }) {
     container.innerHTML = '';
     container.style.display = 'block';
 
-    const title = document.createElement('h4');
-    title.textContent = 'Continue as an existing player';
-    container.appendChild(title);
+    const titleEl = document.createElement('h4');
+    titleEl.textContent = title;
+    container.appendChild(titleEl);
 
-    const hint = document.createElement('p');
-    hint.className = 'hotseat-resume-hint';
-    hint.textContent = 'This room is already full. Continue local hotseat, or choose one player for online mode.';
-    container.appendChild(hint);
+    const hintEl = document.createElement('p');
+    hintEl.className = 'hotseat-resume-hint';
+    hintEl.textContent = hint;
+    container.appendChild(hintEl);
 
     const hotseatButton = document.createElement('button');
     hotseatButton.type = 'button';
     hotseatButton.className = 'btn btn-primary hotseat-resume-main';
     hotseatButton.textContent = 'Continue Hotseat';
-    hotseatButton.addEventListener('click', () => continueExistingRoomHotseat(inviteCode));
+    hotseatButton.addEventListener('click', onHotseat);
     container.appendChild(hotseatButton);
 
     const playerList = document.createElement('div');
     playerList.className = 'hotseat-player-options';
+
     const playerLabel = document.createElement('p');
     playerLabel.className = 'hotseat-resume-hint';
     playerLabel.textContent = 'Continue online as:';
     playerList.appendChild(playerLabel);
 
-    room.room_members.forEach(member => {
+    players.forEach(player => {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'btn btn-secondary btn-sm hotseat-player-option';
-        button.textContent = member.player_name || 'Player';
-        button.addEventListener('click', () => continueExistingRoomMember(inviteCode, member.id));
+        button.textContent = player.label;
+        button.addEventListener('click', player.onClick);
         playerList.appendChild(button);
     });
 
     container.appendChild(playerList);
-    return true;
 }
 
 function clearHotseatResume(inviteCode) {
-    const code = String(inviteCode || '').trim().toUpperCase();
+    const code = normalizeInviteCode(inviteCode);
     if (!code) return;
 
     const rooms = getHotseatResumeRooms();
@@ -266,42 +243,32 @@ async function createNewRoom(roomName, maxPlayers, playerName) {
 }
 
 async function joinRoomByCode(inviteCode, playerName) {
-    // 1. Find room by code
-    const room = await apiFetch(`/rooms/by-code/${inviteCode.toUpperCase()}`);
+    const code = normalizeInviteCode(inviteCode);
+    const room = await apiFetch(`/rooms/by-code/${code}`);
 
-    // 2. Join the room (server handles "already joined" gracefully)
     return apiFetch(`/rooms/${room.id}/join`, {
         method: 'POST',
         body: JSON.stringify({ player_name: playerName })
     });
 }
 
-async function claimRoomMemberByCode(inviteCode, memberId) {
-    return apiFetch(`/rooms/by-code/${inviteCode.toUpperCase()}/claim-member`, {
+async function continueExistingRoomMember(inviteCode, memberId) {
+    const code = normalizeInviteCode(inviteCode);
+    const data = await apiFetch(`/rooms/by-code/${code}/claim-member`, {
         method: 'POST',
         body: JSON.stringify({ member_id: memberId })
     });
-}
-
-async function claimRoomHotseatByCode(inviteCode) {
-    return apiFetch(`/rooms/by-code/${inviteCode.toUpperCase()}/claim-hotseat`, {
-        method: 'POST'
-    });
-}
-
-async function continueExistingRoomMember(inviteCode, memberId) {
-    const data = await claimRoomMemberByCode(inviteCode, memberId);
     localStorage.setItem('auth_token', data.token);
     sessionStorage.removeItem('hotseat_tokens');
 
-    const room = data.room;
-    window.location.href = room.status === 'in_progress'
-        ? `game.html?room=${encodeURIComponent(room.id)}`
-        : `waiting.html?room=${encodeURIComponent(room.id)}`;
+    navigateToRoom(data.room);
 }
 
 async function continueExistingRoomHotseat(inviteCode) {
-    const data = await claimRoomHotseatByCode(inviteCode);
+    const code = normalizeInviteCode(inviteCode);
+    const data = await apiFetch(`/rooms/by-code/${code}/claim-hotseat`, {
+        method: 'POST'
+    });
     const room = data.room;
     const tokens = data.tokens || [];
     if (tokens.length === 0) throw new Error('No players found for hotseat resume');
@@ -310,9 +277,19 @@ async function continueExistingRoomHotseat(inviteCode) {
     localStorage.setItem('auth_token', tokens[0].token);
     saveHotseatResume(room, tokens);
 
-    window.location.href = room.status === 'in_progress'
-        ? `game.html?room=${encodeURIComponent(room.id)}`
-        : `waiting.html?room=${encodeURIComponent(room.id)}`;
+    navigateToRoom(room);
+}
+
+function navigateToGameRoom(roomId) {
+    window.location.href = `game.html?room=${encodeURIComponent(roomId)}`;
+}
+
+function navigateToRoom(room) {
+    if (room.status === 'in_progress') {
+        navigateToGameRoom(room.id);
+        return;
+    }
+    window.location.href = `waiting.html?room=${encodeURIComponent(room.id)}`;
 }
 
 async function getUserRooms() {
@@ -327,45 +304,29 @@ async function getRoomById(roomId) {
     return apiFetch(`/rooms/${roomId}`);
 }
 
-async function startGame(roomId, initialGameState) {
+async function startGame(roomId) {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not authenticated');
 
     const room = await getRoomById(roomId);
     if (room.host_id !== user.id) throw new Error('Only the host can start the game');
 
-    // Create game record. The backend also marks the room in progress atomically.
-    const game = await apiFetch('/games', {
+    return apiFetch('/games', {
         method: 'POST',
-        body: JSON.stringify({ room_id: roomId, game_state: initialGameState })
+        body: JSON.stringify({ room_id: roomId })
     });
-
-    return game;
 }
 
 async function getGameByRoomId(roomId) {
     try {
         return await apiFetch(`/games/by-room/${roomId}`);
     } catch (err) {
-        if (err.message.includes('404') || err.message.includes('not found')) return null;
+        if (err.status === 404) return null;
         throw err;
     }
 }
 
-async function logGameEvent(gameId, eventType, eventData) {
-    try {
-        await apiFetch(`/games/${gameId}/events`, {
-            method: 'POST',
-            body: JSON.stringify({ event_type: eventType, event_data: eventData })
-        });
-        return true;
-    } catch (err) {
-        console.error('Error logging game event:', err);
-        return false;
-    }
-}
-
-// Send invite email via backend (best-effort)
+// Send room-code email via backend (best-effort)
 async function callSendRoomCode(payload) {
     try {
         await apiFetch('/rooms/send-code', {
@@ -373,8 +334,15 @@ async function callSendRoomCode(payload) {
             body: JSON.stringify(payload)
         });
     } catch (err) {
-        console.warn('send-room-code error:', err);
+        console.warn('Room code email error:', err);
     }
+}
+
+async function sendForgotRoomCodes(email) {
+    return apiFetch('/rooms/send-code', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'forgot_code', email })
+    });
 }
 
 // ----------------------------------------------------------------
@@ -421,11 +389,6 @@ function subscribeToGame(roomId, onGameUpdate) {
     };
 }
 
-// Legacy alias used in waiting.js (kept for backwards compat)
-async function unsubscribeChannel(sub) {
-    if (sub && typeof sub.unsubscribe === 'function') sub.unsubscribe();
-}
-
 // ----------------------------------------------------------------
 // Shared utilities
 // ----------------------------------------------------------------
@@ -434,6 +397,12 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function escapeAttr(text) {
+    return escapeHtml(text)
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 function formatTimeAgo(dateString) {
@@ -446,14 +415,4 @@ function formatTimeAgo(dateString) {
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
     if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
     return date.toLocaleDateString();
-}
-
-// Generate random invite code (kept for any local usage)
-function generateInviteCode() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let code = '';
-    for (let i = 0; i < 6; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return code;
 }

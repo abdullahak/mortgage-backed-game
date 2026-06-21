@@ -7,6 +7,18 @@ const jwt = require('jsonwebtoken');
 
 const TEST_JWT_SECRET = 'test-secret';
 
+function resetTestDb(db) {
+    db.exec(`
+        DELETE FROM game_actions;
+        DELETE FROM game_events;
+        DELETE FROM games;
+        DELETE FROM room_members;
+        DELETE FROM rooms;
+        DELETE FROM otps;
+        DELETE FROM users;
+    `);
+}
+
 function signToken(userId) {
     return jwt.sign({ sub: userId }, TEST_JWT_SECRET, { expiresIn: '1h' });
 }
@@ -45,14 +57,19 @@ function createRoomFixture(db, hostId, opts = {}) {
         VALUES (?, ?, ?, ?, ?, ?)
     `).run(roomId, inviteCode, hostId, name, maxPlayers, status);
 
-    db.prepare(`
-        INSERT INTO room_members (id, room_id, user_id, player_name)
-        VALUES (?, ?, ?, ?)
-    `).run(memberId, roomId, hostId, opts.playerName || 'Host');
+    addRoomMemberFixture(db, roomId, hostId, opts.playerName || 'Host', memberId);
 
     const room = db.prepare(`SELECT * FROM rooms WHERE id = ?`).get(roomId);
     const members = db.prepare(`SELECT * FROM room_members WHERE room_id = ?`).all(roomId);
     return { ...room, room_members: members };
+}
+
+function addRoomMemberFixture(db, roomId, userId, playerName = 'Player', memberId = uuidv4()) {
+    db.prepare(`
+        INSERT INTO room_members (id, room_id, user_id, player_name)
+        VALUES (?, ?, ?, ?)
+    `).run(memberId, roomId, userId, playerName);
+    return db.prepare(`SELECT * FROM room_members WHERE id = ?`).get(memberId);
 }
 
 /**
@@ -68,6 +85,20 @@ function createGameFixture(db, roomId, opts = {}) {
     `).run(gameId, roomId, JSON.stringify(gameState));
 
     return db.prepare(`SELECT * FROM games WHERE id = ?`).get(gameId);
+}
+
+function createOtpFixture(db, email, code, opts = {}) {
+    const id = uuidv4();
+    const expires = opts.expiredMinutesAgo > 0
+        ? toSqliteDate(new Date(Date.now() - opts.expiredMinutesAgo * 60 * 1000))
+        : toSqliteDate(new Date(Date.now() + 10 * 60 * 1000));
+
+    db.prepare(`
+        INSERT INTO otps (id, email, code, expires_at, used)
+        VALUES (?, ?, ?, ?, ?)
+    `).run(id, email, code, expires, opts.used ? 1 : 0);
+
+    return id;
 }
 
 /**
@@ -127,4 +158,18 @@ function randomInviteCode() {
     return code;
 }
 
-module.exports = { createUserFixture, createRoomFixture, createGameFixture, buildGameState, signToken };
+function toSqliteDate(date) {
+    return date.toISOString().replace('T', ' ').slice(0, 19);
+}
+
+module.exports = {
+    resetTestDb,
+    addRoomMemberFixture,
+    createUserFixture,
+    createRoomFixture,
+    createGameFixture,
+    createOtpFixture,
+    buildGameState,
+    signToken,
+    toSqliteDate,
+};

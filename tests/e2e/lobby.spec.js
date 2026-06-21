@@ -1,9 +1,6 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
-const { loginPage } = require('./helpers');
-
-const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
-const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
+const { BASE, BASE_API, loginPage } = require('./helpers');
 
 test.describe('Lobby', () => {
     let token, userId;

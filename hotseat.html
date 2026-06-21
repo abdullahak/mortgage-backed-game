@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Play Locally — Mortgage Backed Monopoly</title>
-    <link rel="stylesheet" href="src/css/style.css?v=9">
+    <link rel="stylesheet" href="src/css/style.css?v=10">
 </head>
 <body>
     <div class="container">
@@ -33,7 +33,7 @@
                 </div>
 
                 <div style="margin-bottom: 20px;">
-                    <button class="btn btn-secondary btn-sm" onclick="addPlayerField()" id="add-player-btn">
+                    <button class="btn btn-secondary btn-sm" id="add-player-btn">
                         + Add Player
                     </button>
                     <span style="color: #95a5a6; font-size: 0.85em; margin-left: 8px;">up to 6 players</span>
@@ -41,7 +41,7 @@
 
                 <div id="hotseat-error" class="error-message"></div>
 
-                <button class="btn btn-primary btn-large" onclick="startHotseatGame()" id="start-hotseat-btn"
+                <button class="btn btn-primary btn-large" id="start-hotseat-btn"
                         style="width: 100%; margin-bottom: 12px;">
                     Start Local Game
                 </button>
@@ -52,11 +52,7 @@
         </div>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="src/js/config.js?v=4"></script>
-    <script src="src/js/supabase.js?v=8"></script>
-    <script src="src/js/game-data.js?v=1"></script>
-    <script src="src/js/board.js?v=5"></script>
-    <script src="src/js/hotseat.js?v=2"></script>
+    <script src="src/js/api.js?v=4"></script>
+    <script src="src/js/hotseat.js?v=4"></script>
 </body>
 </html>

@@ -79,6 +79,8 @@ const HOUSE_COSTS = {
     Red: 150, Yellow: 150, Green: 200, 'Dark Blue': 200,
 };
 
+const JAIL_FINE_AMOUNT = 50;
+
 const CHANCE_CARDS = [
     { id: 'ch-1', text: 'Advance to GO. Collect $200.', action: { type: 'advance_to', position: 0 } },
     { id: 'ch-2', text: 'Advance to Illinois Ave.', action: { type: 'advance_to', position: 24 } },
@@ -280,6 +282,14 @@ function applyAction(inputState, actorUserId, action, options = {}) {
             requireTurn();
             rollDice(state, actor, events, options);
             break;
+        case 'pay_jail_fine':
+            requireTurn();
+            payJailFine(state, actor, events);
+            break;
+        case 'use_get_out_of_jail_card':
+            requireTurn();
+            useGetOutOfJailCard(state, actor, events);
+            break;
         case 'buy_property':
             requireTurn();
             buyProperty(state, actor, events);
@@ -326,6 +336,10 @@ function applyAction(inputState, actorUserId, action, options = {}) {
         case 'pay_debt':
             requireTurn();
             payDebt(state, actor, action.payload || {}, events);
+            break;
+        case 'refinance_debt':
+            requireTurn();
+            refinanceDebt(state, actor, action.payload || {}, events);
             break;
         case 'buy_houses':
             requireTurn();
@@ -394,7 +408,7 @@ function rollDice(state, player, events, options) {
             sendToJail(player);
             player.diceRolled = true;
             log(state, `${player.name} rolled doubles 3 times - sent to Jail!`);
-            events.push(makeEvent(player, 'dice_roll', { die1, die2, total, isDoubles, sentToJail: true }));
+            events.push(makeEvent(player, 'dice_roll', { player: player.name, die1, die2, total, isDoubles, sentToJail: true }));
             return;
         }
     } else if (!wasInJail) {
@@ -402,28 +416,21 @@ function rollDice(state, player, events, options) {
     }
 
     if (wasInJail) {
-        if (player.hasGetOutOfJailCard) {
-            player.hasGetOutOfJailCard = false;
-            player.inJail = false;
-            player.jailTurns = 0;
-            log(state, `${player.name} used a Get Out of Jail Free card.`);
-        } else if (isDoubles) {
-            player.inJail = false;
-            player.jailTurns = 0;
+        if (isDoubles) {
+            releaseFromJail(player);
             log(state, `${player.name} rolled doubles and left Jail.`);
         } else {
             player.jailTurns += 1;
             if (player.jailTurns >= 3) {
-                player.cash -= 50;
-                recordCashFlow(state, player.userId, null, 50);
-                player.inJail = false;
-                player.jailTurns = 0;
-                events.push(makeEvent(player, 'forced_payment', { from: player.name, to: 'the Bank', amount: 50, reason: 'Jail bail' }));
-                log(state, `${player.name} paid $50 bail after their third Jail turn.`);
+                player.cash -= JAIL_FINE_AMOUNT;
+                recordCashFlow(state, player.userId, null, JAIL_FINE_AMOUNT);
+                releaseFromJail(player);
+                events.push(makeEvent(player, 'forced_payment', { from: player.name, to: 'the Bank', amount: JAIL_FINE_AMOUNT, reason: 'Jail bail' }));
+                log(state, `${player.name} paid $${JAIL_FINE_AMOUNT} bail after their third Jail turn.`);
             } else {
                 player.diceRolled = true;
                 log(state, `${player.name} is in Jail (turn ${player.jailTurns}/3). Rolled ${die1}+${die2}.`);
-                events.push(makeEvent(player, 'dice_roll', { die1, die2, total, isDoubles, inJail: true }));
+                events.push(makeEvent(player, 'dice_roll', { player: player.name, die1, die2, total, isDoubles, inJail: true }));
                 return;
             }
         }
@@ -437,6 +444,31 @@ function rollDice(state, player, events, options) {
     log(state, `${player.name} rolled ${die1}+${die2}=${total} - moved to ${square.name}${canRollAgain ? ' (doubles - roll again!)' : ''}`);
     events.push(makeEvent(player, 'dice_roll', { player: player.name, die1, die2, total, isDoubles, square: square.name, jailReleased: wasInJail }));
     processLanding(state, player, square, total, events);
+}
+
+function payJailFine(state, player, events) {
+    requireJailExitChoice(player);
+    state.lastDiceRoll = null;
+    player.cash -= JAIL_FINE_AMOUNT;
+    recordCashFlow(state, player.userId, null, JAIL_FINE_AMOUNT);
+    releaseFromJail(player);
+    events.push(makeEvent(player, 'jail_fine_paid', { player: player.name, amount: JAIL_FINE_AMOUNT }));
+    log(state, `${player.name} paid $${JAIL_FINE_AMOUNT} to leave Jail.`);
+}
+
+function useGetOutOfJailCard(state, player, events) {
+    requireJailExitChoice(player);
+    if (!player.hasGetOutOfJailCard) throw new GameRuleError(400, 'No Get Out of Jail Free card available');
+    state.lastDiceRoll = null;
+    player.hasGetOutOfJailCard = false;
+    releaseFromJail(player);
+    events.push(makeEvent(player, 'jail_card_used', { player: player.name }));
+    log(state, `${player.name} used a Get Out of Jail Free card.`);
+}
+
+function requireJailExitChoice(player) {
+    if (!player.inJail) throw new GameRuleError(400, 'Player is not in Jail');
+    if (player.diceRolled) throw new GameRuleError(400, 'Jail choice must be made before rolling');
 }
 
 function movePlayer(state, player, spaces, events) {
@@ -973,6 +1005,91 @@ function issueDebt(state, player, payload, events) {
     recordCashFlow(state, null, player.userId, amount);
     events.push(makeEvent(player, 'debt_issued', { issuer: player.name, amount, interestRate }));
     log(state, `${player.name} issued debt: $${amount.toFixed(2)} @ ${interestRate}%`);
+}
+
+function refinanceDebt(state, player, payload, events) {
+    const amount = positiveNumber(payload.amount, 'amount');
+    const interestRate = positiveNumber(state.settings.interestRate, 'interestRate');
+    if (interestRate > 100) throw new GameRuleError(400, 'Interest rate too high');
+
+    const selectedDebts = resolveSelectedPlayerDebts(player, payload);
+    if (!selectedDebts.length) throw new GameRuleError(400, 'Select at least one debt to refinance');
+
+    const payoffAmount = selectedDebts.reduce((sum, debt) => {
+        const principal = Number(debt.principal || 0);
+        if (!Number.isFinite(principal) || principal <= 0) {
+            throw new GameRuleError(400, 'Selected debts must have positive principal');
+        }
+        return sum + principal;
+    }, 0);
+
+    if (amount <= payoffAmount) {
+        throw new GameRuleError(400, 'Refinance amount must exceed selected debt principal');
+    }
+
+    const collateralIds = Array.isArray(payload.collateralIds) ? uniqueIds(payload.collateralIds) : [];
+    const collateral = collateralIds.map(id => {
+        const prop = state.properties.find(p => p.id === id && p.ownerId === player.userId);
+        if (!prop) throw new GameRuleError(400, 'Collateral must be owned by issuer');
+        return { id: prop.id, name: prop.name, value: prop.price };
+    });
+
+    const refinancedFrom = selectedDebts.map(debt => ({
+        id: debt.id || null,
+        principal: Number(debt.principal || 0),
+        interestRate: Number(debt.interestRate || 0),
+    }));
+    const selectedDebtSet = new Set(selectedDebts);
+    player.debts = player.debts.filter(debt => !selectedDebtSet.has(debt));
+
+    const netProceeds = amount - payoffAmount;
+    player.debts.push({
+        id: `debt-${uuidv4()}`,
+        principal: amount,
+        interestRate,
+        collateral,
+        issueDate: new Date().toISOString(),
+        issuerType: 'player',
+        refinancedFrom,
+    });
+    player.cash += netProceeds;
+    recordCashFlow(state, null, player.userId, amount);
+    recordCashFlow(state, player.userId, null, payoffAmount);
+    events.push(makeEvent(player, 'debt_refinanced', {
+        borrower: player.name,
+        amount,
+        payoffAmount,
+        netProceeds,
+        interestRate,
+        refinancedDebtCount: selectedDebts.length,
+    }));
+    log(state, `${player.name} refinanced ${selectedDebts.length} debt(s) into $${amount.toFixed(2)} @ ${interestRate}% and received $${netProceeds.toFixed(2)} net cash`);
+}
+
+function resolveSelectedPlayerDebts(player, payload) {
+    const refs = [];
+    if (Array.isArray(payload.debtIds)) {
+        payload.debtIds.forEach(id => refs.push({ id }));
+    }
+    if (Array.isArray(payload.debtIndexes)) {
+        payload.debtIndexes.forEach(index => refs.push({ index }));
+    }
+    if (payload.debtId) refs.push({ id: payload.debtId });
+    if (payload.debtIndex !== undefined) refs.push({ index: payload.debtIndex });
+
+    const selected = [];
+    const seenIndexes = new Set();
+    refs.forEach(ref => {
+        const debt = ref.id
+            ? player.debts.find(item => item.id === ref.id)
+            : player.debts[Number(ref.index)];
+        if (!debt) throw new GameRuleError(404, 'Debt not found');
+        const index = player.debts.indexOf(debt);
+        if (seenIndexes.has(index)) return;
+        seenIndexes.add(index);
+        selected.push(debt);
+    });
+    return selected;
 }
 
 function canManageCorporationDebt(corp, userId) {
@@ -2172,6 +2289,12 @@ function sendToJail(player) {
     player.doubleCount = 0;
 }
 
+function releaseFromJail(player) {
+    player.inJail = false;
+    player.jailTurns = 0;
+    player.doubleCount = 0;
+}
+
 function makeEvent(player, type, data) {
     return { type, playerId: player ? player.userId : null, data: data || {} };
 }
@@ -2259,6 +2382,7 @@ module.exports = {
     calculateRent,
     calculateNetWorth,
     validateStateInvariants,
+    applyCardEffect,
     shuffleDeck,
     findNearestType,
     GameRuleError,

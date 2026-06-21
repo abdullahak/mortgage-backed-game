@@ -33,7 +33,7 @@ This roadmap tracks what needs to be true before people can reliably play Mortga
 - Fixed Jail edge cases: rolling doubles to leave Jail now consumes the turn roll, forced third-turn bail is logged as a bank payment, and bail-driven negative cash uses the normal bankruptcy warning path.
 - Added targeted bank-return bankruptcy coverage for tax, card-payment, Jail bail, and debt-interest negative-cash paths.
 - Added operational readiness basics: database hot-path indexes, a DB-backed health endpoint, and structured game-action audit logging with game/room/action/version metadata.
-- Added configurable rate limits for auth requests, room creation, authoritative game actions, and manual game event writes.
+- Added configurable rate limits for auth requests, room creation, and authoritative game actions.
 - Fixed edge cases for Chance nearest utility, Chance nearest railroad, and corporation-owned rent collection.
 - Aligned README and game rules with the digital-first game flow.
 
@@ -108,11 +108,11 @@ Acceptance criteria:
 
 ### 5. Real-player E2E and release CI
 
-The long real-player Playwright scenario is currently skipped. It should be promoted to a gated release test once stable enough.
+The long real-player Playwright scenario has a dedicated dev-only runner (`npm run test:e2e:real-game`) that starts isolated web/API servers and uses a dev-only SQLite database. It should be promoted into the release checklist or CI gate once runtime and artifact handling are stable enough.
 
 Acceptance criteria:
 
-- The real-player scenario runs in CI or a release checklist without skipping.
+- The real-player scenario runs in CI or a release checklist against dev-only ports and data.
 - It captures screenshots for lobby, waiting room, board, market, corporation, debt, bankruptcy, and endgame states.
 - It runs against dev-only ports and dev-only data.
 - Failures produce enough artifact detail to debug quickly.
@@ -132,7 +132,7 @@ Acceptance criteria:
 - Covered: database indexes exist for room membership lookup, player room listing, game by room, game events by game, actions by game, actions by actor, OTP lookup, and room status listing.
 - Covered: successful game actions emit structured audit logs with game ID, room ID, actor ID, action type, action ID, old version, new version, event count, and ended state when audit logging is enabled.
 - Covered: `/api/health` verifies Express and SQLite readiness and reports applied migrations.
-- Covered: configurable rate limits protect auth, room creation, game actions, and manual event writes, with `429` responses and retry metadata.
+- Covered: configurable rate limits protect auth, room creation, and game actions, with `429` responses and retry metadata.
 - Add backup/restore steps for the production SQLite database.
 
 ### Soak tests
@@ -216,7 +216,7 @@ Acceptance criteria:
 ### Week 1: Hardening the playable core
 
 - Continue polishing corporation lifecycle UX and documentation after the initial insolvency policy.
-- Promote real-player E2E from skipped to active where practical.
+- Promote the real-player E2E runner into the release checklist or CI where practical.
 
 ### Weeks 2-3: Multiplayer reliability
 

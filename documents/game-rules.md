@@ -22,7 +22,7 @@ This document assumes you already know standard Monopoly. It focuses on the new 
 
 ### Logging In
 
-Navigate to the site and enter your email address. A magic link will be sent to that address — click it to authenticate. No password required. You can also join a room anonymously without logging in (limited features).
+Navigate to the site and enter your email address. A one-time code will be sent to that address; enter it to authenticate. No password required. You can also join a room anonymously without logging in.
 
 ### Creating a Room
 
@@ -254,10 +254,17 @@ The default room debt rate is **5% per turn**.
 ### Repaying Debt
 
 1. Go to **Manage Debt** → select **Settle Debt**.
-2. Choose the loan from the dropdown and enter a payment amount.
+2. Choose the loan from the dropdown and enter a payment amount, or use **Full Amount** to fill the remaining principal.
 3. The payment reduces the principal. If the principal reaches $0 or below, the debt is fully cleared.
 
 Partial payments are allowed.
+
+### Refinancing Debt
+
+1. Go to **Manage Debt** → select **Refinance Existing Debt**.
+2. Select one or more existing personal debts.
+3. Enter a new loan amount greater than the selected payoff total, then choose collateral properties.
+4. The selected debts are cleared, one new loan is created at the room's debt rate, and only the net cash above the payoff total is added to your balance.
 
 ---
 
@@ -322,15 +329,17 @@ For simple cash transfers (rent side-deals, fines, gifts):
 
 ### Escaping Jail
 
-On each turn while in Jail, roll the dice:
+At the start of each turn while in Jail, choose one available option:
 
-- **Roll doubles** → released immediately; move that many spaces.
+- **Roll for doubles** → if you roll doubles, you are released immediately and move that many spaces.
+- **Pay the $50 fine** → leave Jail, then roll normally to move.
+- **Use a Get Out of Jail Free card** → leave Jail, then roll normally to move.
 - **No doubles, turns 1–2** → still in Jail; turn ends.
 - **No doubles, turn 3** → forced to pay **$50 bail**, then move.
 
-Leaving Jail by rolling doubles or by forced third-turn bail consumes that turn's roll; you do not roll again afterward.
+Leaving Jail by paying the fine or using a card happens before your move roll. Leaving Jail by rolling doubles or by forced third-turn bail consumes that turn's roll; you do not roll again afterward.
 
-If you hold a **Get Out of Jail Free** card (from a Chance or Community Chest draw), it is used automatically on your next jail turn.
+If you hold a **Get Out of Jail Free** card (from a Chance or Community Chest draw), it stays in your hand until you choose to use it.
 
 While in Jail you can still buy properties, create IPOs, manage debt, and trade via the Market tab.
 

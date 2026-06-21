@@ -55,7 +55,7 @@ test.describe('thorough real-player UI game flow', () => {
             await shot(testInfo, pages.Alice, '06-board-initial-state');
 
             await openTab(pages.Alice, 'Game');
-            await clickAndWaitForGameVersion(pages.Alice, activeGameButton(pages.Alice, 'rollDiceAndMove()'));
+            await clickAndWaitForGameVersion(pages.Alice, activeGameButton(pages.Alice, 'roll-dice'));
             await expect(pages.Alice.locator('#gameContent')).toContainText(/rolled \d\+\d=/, { timeout: 10000 });
             await expect(pages.Alice.locator('.landing-summary')).toBeVisible({ timeout: 10000 });
             await shot(testInfo, pages.Alice, '07-alice-roll-through-ui');
@@ -293,12 +293,12 @@ async function openTab(page, tabName) {
 
 async function buyCurrentSquare(page, expectedText) {
     await openTab(page, 'Game');
-    await activeGameButton(page, 'openBuyPropertyModal()').click();
+    await activeGameButton(page, 'open-buy-property').click();
     await expect(page.locator('#buyPropertyModal')).toBeVisible();
     await expect(page.locator('#availableProperties')).toContainText(expectedText, { timeout: 10000 });
     await expect(page.locator('#purchasePriceDisplay')).toContainText(/\$\d+\.\d{2}/);
     await expect(page.locator('#purchasePrice')).toHaveAttribute('type', 'hidden');
-    await clickAndWaitForGameVersion(page, page.locator('#buyPropertyModal button[onclick="confirmPurchase()"]'));
+    await clickAndWaitForGameVersion(page, page.locator('#confirm-purchase-btn'));
     await expect(page.locator('#buyPropertyModal')).toBeHidden({ timeout: 10000 });
     await expect(page.locator('#gameContent')).toContainText(expectedText, { timeout: 10000 });
 }
@@ -309,20 +309,20 @@ async function buyHouses(page) {
     await expect(page.locator('#houseModal')).toBeVisible();
     await page.locator('#houseModalProperties button').filter({ hasText: '+' }).nth(0).click();
     await page.locator('#houseModalProperties button').filter({ hasText: '+' }).nth(1).click();
-    await clickAndWaitForGameVersion(page, page.locator('#houseModal button[onclick="confirmHousePurchase()"]'));
+    await clickAndWaitForGameVersion(page, page.locator('#confirm-house-purchase-btn'));
     await expect(page.locator('#gameContent')).toContainText(/Properties:/, { timeout: 10000 });
 }
 
 async function issueDebt(page, amount, rate) {
     await openTab(page, 'Game');
-    await activeGameButton(page, 'openDebtModal()').click();
+    await activeGameButton(page, 'open-debt').click();
     await expect(page.locator('#debtModal')).toBeVisible();
     const collateral = page.locator('#collateralAssets input[type="checkbox"]').first();
     if (await collateral.count()) await collateral.check();
     await page.locator('#loanAmount').fill(String(amount));
     await expect(page.locator('#loanRateDisplay')).toContainText(`${rate}%`);
     await expect(page.locator('#loanRate')).toHaveAttribute('type', 'hidden');
-    await clickAndWaitForGameVersion(page, page.locator('#debtModal button[onclick="processDebt()"]'));
+    await clickAndWaitForGameVersion(page, page.locator('#process-debt-btn'));
     await expect(page.locator('#debtModal')).toBeHidden({ timeout: 10000 });
     await expect(page.locator('#gameContent')).toContainText(new RegExp(`\\$${amount}\\.00 @ ${rate}%`), { timeout: 10000 });
     await expect(page.locator('#gameContent')).toContainText(/Interest next turn:/, { timeout: 10000 });
@@ -330,29 +330,29 @@ async function issueDebt(page, amount, rate) {
 
 async function settleDebt(page, amount) {
     await openTab(page, 'Game');
-    await activeGameButton(page, 'openDebtModal()').click();
+    await activeGameButton(page, 'open-debt').click();
     await page.locator('#debtAction').selectOption('settle');
     await page.locator('#settlementAmount').fill(String(amount));
-    await clickAndWaitForGameVersion(page, page.locator('#debtModal button[onclick="processDebt()"]'));
+    await clickAndWaitForGameVersion(page, page.locator('#process-debt-btn'));
     await expect(page.locator('#debtModal')).toBeHidden({ timeout: 10000 });
     await expect(page.locator('#gameContent')).toContainText(/Debts:/, { timeout: 10000 });
 }
 
 async function createIpo(page, ticker, shares, price, assetId) {
     await openTab(page, 'Game');
-    await activeGameButton(page, 'openIPOModal()').click();
+    await activeGameButton(page, 'open-ipo').click();
     await expect(page.locator('#ipoModal')).toBeVisible();
     await page.locator('#ipoTicker').fill(ticker);
     await page.locator('#ipoShares').fill(String(shares));
     await page.locator('#ipoPrice').fill(String(price));
     await page.locator(`#ipo-asset-${assetId}`).check();
-    await clickAndWaitForGameVersion(page, page.locator('#ipoModal button[onclick="createIPO()"]'));
+    await clickAndWaitForGameVersion(page, page.locator('#create-ipo-btn'));
     await expect(page.locator('#gameContent')).toContainText(ticker, { timeout: 10000 });
 }
 
 async function expectCorporationDetails(page, ticker, shareholderText) {
     await openTab(page, 'Game');
-    await activeGameButton(page, 'openCorporationModal()').click();
+    await activeGameButton(page, 'open-corporation').click();
     const card = page.locator('.corporation-card').filter({ hasText: ticker }).first();
     await expect(card).toBeVisible({ timeout: 10000 });
     await expect(card).toContainText(/Chairman:/i);
@@ -364,20 +364,20 @@ async function expectCorporationDetails(page, ticker, shareholderText) {
 
 async function issueCorporationDebt(page, ticker, amount) {
     await openTab(page, 'Game');
-    await activeGameButton(page, 'openDebtModal()').click();
+    await activeGameButton(page, 'open-debt').click();
     await expect(page.locator('#debtModal')).toBeVisible();
     await selectByVisibleText(page.locator('#debtIssuer'), `${ticker} Corporation`);
     const collateral = page.locator('#collateralAssets input[type="checkbox"]').first();
     if (await collateral.count()) await collateral.check();
     await page.locator('#loanAmount').fill(String(amount));
-    await clickAndWaitForGameVersion(page, page.locator('#debtModal button[onclick="processDebt()"]'));
+    await clickAndWaitForGameVersion(page, page.locator('#process-debt-btn'));
     await expect(page.locator('#debtModal')).toBeHidden({ timeout: 10000 });
     await expect(page.locator('#gameContent')).toContainText(new RegExp(`issued debt under ${ticker}`, 'i'), { timeout: 10000 });
 }
 
 async function proposeChairmanVote(page, ticker, candidateName) {
     await openTab(page, 'Game');
-    await activeGameButton(page, 'openCorporationModal()').click();
+    await activeGameButton(page, 'open-corporation').click();
     await expect(page.locator('#corporationModal')).toBeVisible();
     const card = page.locator('.corporation-card').filter({ hasText: ticker }).first();
     await selectByVisibleText(card.locator('select[id^="chairmanVoteCandidate-"]'), candidateName);
@@ -390,7 +390,7 @@ async function proposeChairmanVote(page, ticker, candidateName) {
 
 async function supportChairmanVote(page, ticker) {
     await openTab(page, 'Game');
-    await activeGameButton(page, 'openCorporationModal()').click();
+    await activeGameButton(page, 'open-corporation').click();
     await expect(page.locator('#corporationModal')).toBeVisible();
     const card = page.locator('.corporation-card').filter({ hasText: ticker }).first();
     await clickAndWaitForGameVersion(page, card.getByRole('button', { name: /support/i }).first());
@@ -401,7 +401,7 @@ async function supportChairmanVote(page, ticker) {
 
 async function buyShares(page, ticker, shares) {
     await openTab(page, 'Game');
-    await activeGameButton(page, 'openCorporationModal()').click();
+    await activeGameButton(page, 'open-corporation').click();
     await expect(page.locator('#corporationModal')).toBeVisible();
     const card = page.locator('.corporation-card').filter({ hasText: ticker }).first();
     await expect(card).toBeVisible({ timeout: 10000 });
@@ -413,14 +413,14 @@ async function buyShares(page, ticker, shares) {
 async function rollAndPayRent(page, dice, ownerName) {
     await openTab(page, 'Game');
     await page.evaluate(dice => { window.__E2E_NEXT_DICE = dice.slice(); }, dice);
-    await clickAndWaitForGameVersion(page, activeGameButton(page, 'rollDiceAndMove()'));
+    await clickAndWaitForGameVersion(page, activeGameButton(page, 'roll-dice'));
     await expect(page.locator('#gameContent')).toContainText(new RegExp(`paid \\$\\d+(?:\\.\\d+)? to ${ownerName} for Rent`, 'i'), { timeout: 10000 });
 }
 
 async function rollWithDiceAndExpect(page, dice, expectedText) {
     await openTab(page, 'Game');
     await page.evaluate(dice => { window.__E2E_NEXT_DICE = dice.slice(); }, dice);
-    await clickAndWaitForGameVersion(page, activeGameButton(page, 'rollDiceAndMove()'));
+    await clickAndWaitForGameVersion(page, activeGameButton(page, 'roll-dice'));
     await expect(page.locator('#gameContent')).toContainText(expectedText, { timeout: 10000 });
 }
 
@@ -438,7 +438,7 @@ async function tradeCashForProperty(page, cashFrom, propertyFrom, cashAmount, pr
     await page.locator('#player2Select').dispatchEvent('change');
     await expect(page.locator(`#player2-asset-${propertyId}`)).toBeVisible({ timeout: 10000 });
     await page.locator(`#player2-asset-${propertyId}`).check();
-    await clickAndWaitForGameVersion(page, page.locator('button[onclick="executeTransaction()"]'));
+    await clickAndWaitForGameVersion(page, page.locator('#executeTradeBtn'));
     await expect(page.locator('#gameContent')).toContainText('Current Turn:', { timeout: 10000 });
 }
 
@@ -449,28 +449,28 @@ async function makePayment(page, fromName, toName, amount) {
     await expect(fromSelect.locator('option:checked')).toHaveText(fromName, { timeout: 10000 });
     await selectByVisibleText(page.locator('#paymentToPlayer'), toName);
     await page.locator('#paymentAmount').fill(String(amount));
-    await clickAndWaitForGameVersion(page, page.locator('button[onclick="makePayment()"]'));
+    await clickAndWaitForGameVersion(page, page.locator('#makePaymentBtn'));
     await expect(page.locator('#gameContent')).toContainText('Current Turn:', { timeout: 10000 });
 }
 
 async function endTurn(page, nextPlayerName) {
     await openTab(page, 'Game');
-    await clickAndWaitForGameVersion(page, activeGameButton(page, 'endTurn()'));
+    await clickAndWaitForGameVersion(page, activeGameButton(page, 'end-turn'));
     await expect(page.locator('#gameContent')).toContainText(`Current Turn: ${nextPlayerName}`, { timeout: 10000 });
 }
 
 async function endTurnNoAssert(page) {
     await openTab(page, 'Game');
-    await clickAndWaitForGameVersion(page, activeGameButton(page, 'endTurn()'));
+    await clickAndWaitForGameVersion(page, activeGameButton(page, 'end-turn'));
 }
 
 async function endTurnExpectingGameOver(page) {
     await openTab(page, 'Game');
-    await clickAndWaitForGameVersion(page, activeGameButton(page, 'endTurn()'));
+    await clickAndWaitForGameVersion(page, activeGameButton(page, 'end-turn'));
 }
 
-function activeGameButton(page, onclick) {
-    return page.locator(`#game.section.active button[onclick="${onclick}"]`).first();
+function activeGameButton(page, action) {
+    return page.locator(`#game.section.active button[data-game-action="${action}"]`).first();
 }
 
 async function clickAndWaitForGameVersion(page, locator) {

@@ -1,22 +1,19 @@
-// Lobby page functions
-
-let userSession = null;
 let lobbyRoomSubscriptions = [];
+const ROOM_STATUS_LABELS = {
+    waiting: 'Waiting',
+    in_progress: 'In Progress',
+    completed: 'Completed'
+};
 
-// Initialize lobby
 async function initLobby() {
-    userSession = await requireAuth();
-    if (!userSession) return;
+    const user = await requireAuth();
+    if (!user) return;
 
-    // Display user email
-    const user = await getCurrentUser();
     document.getElementById('user-email').textContent = user.email;
 
-    // Load user's rooms
     await loadUserRooms();
 }
 
-// Load user's active rooms
 async function loadUserRooms() {
     try {
         const rooms = await getUserRooms();
@@ -29,24 +26,9 @@ async function loadUserRooms() {
                 </div>
             `;
         } else {
-            roomsList.innerHTML = rooms.map(room => `
-                <div class="room-card" onclick="goToRoom('${room.id}')">
-                    <div class="room-card-header">
-                        <div class="room-name">${escapeHtml(room.name)}</div>
-                        <div class="room-status ${room.status}">${formatStatus(room.status)}</div>
-                    </div>
-                    <div class="room-info">
-                        <span>${room.room_members ? room.room_members.length : 0}/${room.max_players} players</span>
-                        <span>Created ${formatTimeAgo(room.created_at)}</span>
-                    </div>
-                    <div>
-                        <span class="room-invite-code">${room.invite_code}</span>
-                    </div>
-                </div>
-            `).join('');
+            roomsList.innerHTML = rooms.map(renderRoomCard).join('');
         }
 
-        // Unsubscribe from old room sockets, then subscribe to current rooms
         lobbyRoomSubscriptions.forEach(sub => sub.unsubscribe());
         lobbyRoomSubscriptions = rooms.map(room =>
             subscribeToRoom(room.id, () => loadUserRooms(), null)
@@ -61,12 +43,10 @@ async function loadUserRooms() {
     }
 }
 
-// Show create room modal
 function showCreateRoomModal() {
     document.getElementById('createRoomModal').classList.add('active');
 }
 
-// Close modal
 function closeModal(modalId) {
     document.getElementById(modalId).classList.remove('active');
 
@@ -77,10 +57,9 @@ function closeModal(modalId) {
     }
 }
 
-// Create room
 async function createRoom() {
     const roomName = document.getElementById('room-name').value.trim();
-    const maxPlayers = parseInt(document.getElementById('max-players').value);
+    const maxPlayers = Number(document.getElementById('max-players').value);
     const playerName = document.getElementById('host-player-name').value.trim();
 
     if (!roomName || !playerName) {
@@ -88,7 +67,7 @@ async function createRoom() {
         return;
     }
 
-    if (maxPlayers < 2 || maxPlayers > 8) {
+    if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 8) {
         alert('Max players must be between 2 and 8');
         return;
     }
@@ -97,44 +76,71 @@ async function createRoom() {
         const room = await createNewRoom(roomName, maxPlayers, playerName);
         closeModal('createRoomModal');
 
-        // Notify host via email with room code (best-effort)
         const me = await getCurrentUser();
-        if (me && me.email) sendRoomCodeEmail(me.email, room.invite_code, room.name);
+        if (me && me.email) {
+            callSendRoomCode({
+                email: me.email,
+                inviteCode: room.invite_code,
+                roomName: room.name
+            });
+        }
 
-        // Redirect to waiting room
-        window.location.href = `waiting.html?room=${room.id}`;
+        window.location.href = `waiting.html?room=${encodeURIComponent(room.id)}`;
     } catch (error) {
         console.error('Error creating room:', error);
         alert('Error creating game: ' + error.message);
     }
 }
 
-// Go to room
 function goToRoom(roomId) {
-    window.location.href = `waiting.html?room=${roomId}`;
+    window.location.href = `waiting.html?room=${encodeURIComponent(roomId)}`;
 }
 
-// Utility functions
+function renderRoomCard(room) {
+    const memberCount = Array.isArray(room.room_members) ? room.room_members.length : 0;
+    const maxPlayers = Number(room.max_players || 0);
+    return `
+        <div class="room-card" data-room-id="${escapeAttr(room.id)}">
+            <div class="room-card-header">
+                <div class="room-name">${escapeHtml(room.name)}</div>
+                <div class="room-status ${roomStatusClass(room.status)}">${escapeHtml(formatStatus(room.status))}</div>
+            </div>
+            <div class="room-info">
+                <span>${memberCount}/${maxPlayers} players</span>
+                <span>Created ${formatTimeAgo(room.created_at)}</span>
+            </div>
+            <div>
+                <span class="room-invite-code">${escapeHtml(room.invite_code)}</span>
+            </div>
+        </div>
+    `;
+}
+
 function formatStatus(status) {
-    const statusMap = {
-        'waiting': 'Waiting',
-        'in_progress': 'In Progress',
-        'completed': 'Completed'
-    };
-    return statusMap[status] || status;
+    return ROOM_STATUS_LABELS[status] || status;
 }
 
-// escapeHtml and formatTimeAgo are defined in supabase.js
+function roomStatusClass(status) {
+    return ROOM_STATUS_LABELS[status] ? status : 'waiting';
+}
 
-// Close modal when clicking outside
-window.onclick = function(event) {
+window.addEventListener('click', (event) => {
     if (event.target.classList.contains('modal')) {
         event.target.classList.remove('active');
     }
-}
+});
 
-// Handle Enter key in modals
 document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('logout-btn')?.addEventListener('click', handleLogout);
+    document.getElementById('show-create-room-btn')?.addEventListener('click', showCreateRoomModal);
+    document.getElementById('create-room-btn')?.addEventListener('click', createRoom);
+    document.getElementById('cancel-create-room-btn')?.addEventListener('click', () => closeModal('createRoomModal'));
+
+    document.getElementById('active-rooms-list')?.addEventListener('click', (event) => {
+        const card = event.target.closest('.room-card[data-room-id]');
+        if (card) goToRoom(card.dataset.roomId);
+    });
+
     ['room-name', 'max-players', 'host-player-name'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
@@ -145,11 +151,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-function sendRoomCodeEmail(email, inviteCode, roomName) {
-    callSendRoomCode({ action: 'room_created', email, inviteCode, roomName });
-}
-
-// Initialize on page load
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initLobby);
 } else {

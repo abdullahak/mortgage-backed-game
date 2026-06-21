@@ -1,9 +1,6 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
-const { loginPage } = require('./helpers');
-
-const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
-const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
+const { BASE, BASE_API, loginPage, playerState } = require('./helpers');
 
 /**
  * Create a game where the current player is at a specific position.
@@ -25,8 +22,8 @@ async function setupGameAt(request, position, opts = {}) {
     const gameState = {
         currentPlayerIndex: 0,
         players: [
-            { userId: h.user.id, name: 'Alice', cash: 1500, position, bankrupt: false, inJail: opts.inJail || false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
-            { userId: g.user.id, name: 'Bob',   cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+            playerState(h.user.id, 'Alice', { position, inJail: opts.inJail || false }),
+            playerState(g.user.id, 'Bob'),
         ],
         properties: opts.properties || [],
         corporations: [],
@@ -55,7 +52,7 @@ test.describe('Game mechanics — via API state patching', () => {
         const gameState = {
             currentPlayerIndex: 0,
             players: [
-                { userId: h.user.id, name: 'Alice', cash: 1500, position: 10, bankrupt: false, inJail: true, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                playerState(h.user.id, 'Alice', { position: 10, inJail: true }),
             ],
             properties: [], corporations: [], debts: [], lastDiceRoll: null, lastCardDrawn: null,
             settings: { passGoAmount: 200, startingCash: 1500 },
@@ -84,7 +81,7 @@ test.describe('Game mechanics — via API state patching', () => {
         const gameState = {
             currentPlayerIndex: 0,
             players: [
-                { userId: h.user.id, name: 'Alice', cash: -100, position: 0, bankrupt: true, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                playerState(h.user.id, 'Alice', { cash: -100, bankrupt: true }),
             ],
             properties: [], corporations: [], debts: [], lastDiceRoll: null, lastCardDrawn: null,
             settings: { passGoAmount: 200, startingCash: 1500 },
@@ -112,7 +109,7 @@ test.describe('Game mechanics — via API state patching', () => {
         const gameState = {
             currentPlayerIndex: 0,
             players: [
-                { userId: h.user.id, name: 'Alice', cash: 1440, position: 1, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                playerState(h.user.id, 'Alice', { cash: 1440, position: 1 }),
             ],
             properties: [
                 { id: 'prop-0', name: 'Mediterranean Ave', color: 'Brown', price: 60, rent: [2, 10, 30, 90, 160, 250], ownerId: h.user.id, ownerName: 'Alice', houses: 0 },
@@ -143,7 +140,7 @@ test.describe('Game mechanics — via API state patching', () => {
         const gameState = {
             currentPlayerIndex: 0,
             players: [
-                { userId: h.user.id, name: 'Alice', cash: 1300, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                playerState(h.user.id, 'Alice', { cash: 1300 }),
             ],
             properties: [
                 { id: 'prop-0', name: 'Mediterranean Ave', color: 'Brown', price: 60, rent: [2, 10, 30, 90, 160, 250], ownerId: h.user.id, ownerName: 'Alice', houses: 3 },
@@ -165,7 +162,7 @@ test.describe('Game mechanics — via API state patching', () => {
         expect(fetched.game_state.properties[1].houses).toBe(3);
     });
 
-    test('game state update changes current player index', async ({ request }) => {
+    test('end turn action changes current player index', async ({ request }) => {
         const h = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
         const g = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
         const room = await (await request.post(`${BASE_API}/rooms`, {
@@ -180,8 +177,8 @@ test.describe('Game mechanics — via API state patching', () => {
         const gameState = {
             currentPlayerIndex: 0,
             players: [
-                { userId: h.user.id, name: 'Alice', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: true, hasGetOutOfJailCard: false },
-                { userId: g.user.id, name: 'Bob',   cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                playerState(h.user.id, 'Alice', { diceRolled: true }),
+                playerState(g.user.id, 'Bob'),
             ],
             properties: [], corporations: [], debts: [], lastDiceRoll: [3, 4], lastCardDrawn: null,
             settings: { passGoAmount: 200, startingCash: 1500 },
@@ -192,8 +189,6 @@ test.describe('Game mechanics — via API state patching', () => {
             data: { room_id: room.id, game_state: gameState },
         })).json();
 
-        // End turn: advance to player index 1
-        const updatedGs = { ...gameState, currentPlayerIndex: 1, players: gameState.players.map((p, i) => ({ ...p, diceRolled: false })) };
         await request.post(`${BASE_API}/games/${game.id}/actions`, {
             headers: { Authorization: `Bearer ${h.token}` },
             data: { actionId: `e2e-end-turn-${Date.now()}`, type: 'end_turn', payload: {}, expectedVersion: game.state_version },
@@ -216,7 +211,7 @@ test.describe('Game mechanics — via API state patching', () => {
         const gameState = {
             currentPlayerIndex: 0,
             players: [
-                { userId: h.user.id, name: 'Alice', cash: 2000, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                playerState(h.user.id, 'Alice', { cash: 2000 }),
             ],
             properties: [], corporations: [],
             debts: [debt],
@@ -254,8 +249,8 @@ test.describe('Game mechanics — UI', () => {
             data: { room_id: room.id, game_state: {
                 currentPlayerIndex: 0,
                 players: [
-                    { userId: h.user.id, name: 'Alice', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
-                    { userId: g.user.id, name: 'Bob',   cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                    playerState(h.user.id, 'Alice'),
+                    playerState(g.user.id, 'Bob'),
                 ],
                 properties: [], corporations: [], debts: [], lastDiceRoll: null, lastCardDrawn: null,
                 settings: { passGoAmount: 200, startingCash: 1500 },
@@ -292,8 +287,8 @@ test.describe('Game mechanics — UI', () => {
             data: { room_id: room.id, game_state: {
                 currentPlayerIndex: 0,
                 players: [
-                    { userId: h.user.id, name: 'Alice', cash: -25, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: true, hasGetOutOfJailCard: false },
-                    { userId: g.user.id, name: 'Bob', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                    playerState(h.user.id, 'Alice', { cash: -25, diceRolled: true }),
+                    playerState(g.user.id, 'Bob'),
                 ],
                 properties: [],
                 corporations: [],
@@ -328,8 +323,8 @@ test.describe('Game mechanics — UI', () => {
             data: { room_id: room.id, game_state: {
                 currentPlayerIndex: 0,
                 players: [
-                    { userId: h.user.id, name: 'Alice', cash: 1500, position: 14, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: true, hasGetOutOfJailCard: false },
-                    { userId: g.user.id, name: 'Bob', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                    playerState(h.user.id, 'Alice', { position: 14, diceRolled: true }),
+                    playerState(g.user.id, 'Bob'),
                 ],
                 properties: [],
                 corporations: [],
@@ -379,8 +374,8 @@ test.describe('Game mechanics — UI', () => {
             data: { room_id: room.id, game_state: {
                 currentPlayerIndex: 0,
                 players: [
-                    { userId: h.user.id, name: 'Alice', cash: -25, position: 13, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: true, hasGetOutOfJailCard: false },
-                    { userId: g.user.id, name: 'Bob', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                    playerState(h.user.id, 'Alice', { cash: -25, position: 13, diceRolled: true }),
+                    playerState(g.user.id, 'Bob'),
                 ],
                 properties: [],
                 corporations: [],
@@ -434,21 +429,13 @@ test.describe('Game mechanics — UI', () => {
             data: { room_id: room.id, game_state: {
                 currentPlayerIndex: 0,
                 players: [
-                    {
-                        userId: h.user.id,
-                        name: 'Alice',
+                    playerState(h.user.id, 'Alice', {
                         cash: -25,
-                        position: 0,
-                        bankrupt: false,
-                        inJail: false,
-                        jailTurns: 0,
-                        doubleCount: 0,
                         diceRolled: true,
-                        hasGetOutOfJailCard: false,
                         debts: [{ id: 'debt-alice', issuerId: h.user.id, principal: 100, interestRate: 0, turnsOutstanding: 0 }],
-                    },
-                    { userId: g.user.id, name: 'Bob', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
-                    { userId: c.user.id, name: 'Carol', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                    }),
+                    playerState(g.user.id, 'Bob'),
+                    playerState(c.user.id, 'Carol'),
                 ],
                 properties: [
                     { id: 'prop-0', name: 'Mediterranean Ave', color: 'Brown', price: 60, rent: [2, 10, 30, 90, 160, 250], ownerId: h.user.id, ownerName: 'Alice', houses: 3 },
@@ -520,9 +507,9 @@ test.describe('Game mechanics — UI', () => {
             data: { room_id: room.id, game_state: {
                 currentPlayerIndex: 0,
                 players: [
-                    { userId: h.user.id, name: 'Alice', cash: 0, position: 39, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: true, hasGetOutOfJailCard: false },
-                    { userId: g.user.id, name: 'Bob', cash: 1520, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
-                    { userId: c.user.id, name: 'Carol', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                    playerState(h.user.id, 'Alice', { cash: 0, position: 39, diceRolled: true }),
+                    playerState(g.user.id, 'Bob', { cash: 1520 }),
+                    playerState(c.user.id, 'Carol'),
                 ],
                 properties: [
                     { id: 'prop-0', name: 'Mediterranean Ave', color: 'Brown', price: 60, rent: [2, 10, 30, 90, 160, 250], ownerId: h.user.id, ownerName: 'Alice', houses: 2 },
@@ -613,9 +600,9 @@ test.describe('Game mechanics — UI', () => {
             data: { room_id: room.id, game_state: {
                 currentPlayerIndex: 0,
                 players: [
-                    { userId: h.user.id, name: 'Alice', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: true, hasGetOutOfJailCard: false },
-                    { userId: g.user.id, name: 'Bob', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
-                    { userId: c.user.id, name: 'Carol', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+                    playerState(h.user.id, 'Alice', { diceRolled: true }),
+                    playerState(g.user.id, 'Bob'),
+                    playerState(c.user.id, 'Carol'),
                 ],
                 properties: [
                     { id: 'prop-0', name: 'Mediterranean Ave', color: 'Brown', price: 60, rent: [2, 10, 30, 90, 160, 250], ownerId: 'corp-1', ownerName: '[MBS]', houses: 3 },

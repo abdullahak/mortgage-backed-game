@@ -1,9 +1,6 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
-const { loginPage } = require('./helpers');
-
-const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
-const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
+const { BASE, BASE_API, loginPage, playerState } = require('./helpers');
 
 /**
  * Setup a 2-player game with some properties owned.
@@ -25,8 +22,8 @@ async function setupTradingGame(request) {
     const gameState = {
         currentPlayerIndex: 0,
         players: [
-            { userId: h.user.id, name: 'Alice', cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
-            { userId: g.user.id, name: 'Bob',   cash: 1500, position: 0, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false, hasGetOutOfJailCard: false },
+            playerState(h.user.id, 'Alice'),
+            playerState(g.user.id, 'Bob'),
         ],
         properties: [
             { id: 'prop-0', name: 'Mediterranean Ave', color: 'Brown', price: 60, rent: [2, 10, 30, 90, 160, 250], ownerId: h.user.id, ownerName: 'Alice', houses: 0 },
@@ -51,15 +48,6 @@ test.describe('Trading — API state manipulation', () => {
     test('cash transfer between players persists correctly', async ({ request }) => {
         const { game, hostToken, hostId, guestId } = await setupTradingGame(request);
 
-        // Simulate Alice paying Bob $200
-        const updatedState = {
-            ...game.game_state,
-            players: [
-                { ...game.game_state.players[0], cash: 1300 }, // Alice -200
-                { ...game.game_state.players[1], cash: 1700 }, // Bob +200
-            ],
-        };
-
         await request.post(`${BASE_API}/games/${game.id}/actions`, {
             headers: { Authorization: `Bearer ${hostToken}` },
             data: {
@@ -80,15 +68,6 @@ test.describe('Trading — API state manipulation', () => {
     test('property transfer between players persists correctly', async ({ request }) => {
         const { game, hostToken, hostId, guestId } = await setupTradingGame(request);
 
-        // Simulate Alice trading prop-0 to Bob
-        const updatedState = {
-            ...game.game_state,
-            properties: [
-                { ...game.game_state.properties[0], ownerId: guestId, ownerName: 'Bob' },
-                game.game_state.properties[1],
-            ],
-        };
-
         await request.post(`${BASE_API}/games/${game.id}/actions`, {
             headers: { Authorization: `Bearer ${hostToken}` },
             data: {
@@ -108,19 +87,6 @@ test.describe('Trading — API state manipulation', () => {
 
     test('mutual exchange (cash + property) persists correctly', async ({ request }) => {
         const { game, hostToken, hostId, guestId } = await setupTradingGame(request);
-
-        // Alice sends prop-0 to Bob, Bob sends $100 to Alice
-        const updatedState = {
-            ...game.game_state,
-            players: [
-                { ...game.game_state.players[0], cash: 1600 }, // Alice +100
-                { ...game.game_state.players[1], cash: 1400 }, // Bob -100
-            ],
-            properties: [
-                { ...game.game_state.properties[0], ownerId: guestId, ownerName: 'Bob' }, // Alice's prop → Bob
-                game.game_state.properties[1],
-            ],
-        };
 
         await request.post(`${BASE_API}/games/${game.id}/actions`, {
             headers: { Authorization: `Bearer ${hostToken}` },

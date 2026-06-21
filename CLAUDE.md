@@ -4,7 +4,7 @@
 
 This project is hosted on a **Raspberry Pi**, NOT Netlify or any external service.
 
-- Static files served by **nginx** from `/home/abdlh/mortgage-backed-game`
+- Static files served by **nginx** from `/mnt/ssd/projects/mortgage-backed`
 - nginx listens on **port 80**
 - Access via `http://mortgage.abdlh.com` (local DNS override via pihole) or `http://192.168.4.57`
 
@@ -12,7 +12,7 @@ This project is hosted on a **Raspberry Pi**, NOT Netlify or any external servic
 
 ## After Code Changes
 
-No build step needed — it's a pure static site. Just update the files and they're live.
+No build step needed for the static frontend. Keep development work in this repo and deploy deliberately; do not edit production files or restart production services unless explicitly asked.
 
 If the nginx config itself changes:
 ```bash
@@ -41,7 +41,7 @@ sudo systemctl restart mortgage-backend
 ```
 
 ### API helper pattern
-All frontend pages use `apiFetch(path, options)` from `src/js/supabase.js`.
+All frontend pages use `apiFetch(path, options)` from `src/js/api.js`.
 Auth token is attached automatically from `localStorage.getItem('auth_token')`.
 
 ### Socket.io CDN

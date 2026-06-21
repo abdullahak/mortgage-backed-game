@@ -1,21 +1,37 @@
 'use strict';
 
-// board.js is a browser module — set up minimal globals it may reference
+// board.js still owns frontend board ownership helpers; core rules come from backend/domain/gameRules.
 global.document = undefined;
 
 const {
-    calculateRent,
-    hasCompleteColorGroup,
-    getCompleteGroupProperties,
+    calculateRent: calculateRentRule,
     shuffleDeck,
     findNearestType,
-    applyCardEffect,
+    applyCardEffect: applyCardEffectRule,
+    normalizeState,
     BOARD_SQUARES,
     HOUSE_COSTS,
-    PLAYER_COLORS,
     CHANCE_CARDS,
     COMMUNITY_CHEST_CARDS,
+} = require('../../domain/gameRules');
+const {
+    hasCompleteColorGroup,
+    getCompleteGroupProperties,
 } = require('../../../src/js/board.js');
+
+function calculateRent(property, gameState, diceTotal) {
+    return calculateRentRule(gameState, property.id, diceTotal);
+}
+
+function applyCardEffect(card, gameState, activePlayerIndex) {
+    const state = normalizeState(gameState);
+    const events = [];
+    applyCardEffectRule(state, state.players[activePlayerIndex], card, events);
+    return {
+        gameState: state,
+        message: events[events.length - 1]?.data?.effect || 'Card applied',
+    };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers for building minimal gameState objects
@@ -410,11 +426,12 @@ describe('applyCardEffect', () => {
     });
 
     test('back_3: player moves back 3 squares', () => {
-        // Player at 10 → should go to 7
-        const gs = baseGs();
+        const gs = baseGs({ players: [
+            { userId: 'p1', name: 'Alice', cash: 1500, position: 14, bankrupt: false, inJail: false, jailTurns: 0, doubleCount: 0, diceRolled: false },
+        ]});
         const card = { action: { type: 'back_3' } };
         const { gameState } = applyCardEffect(card, gs, 0);
-        expect(gameState.players[0].position).toBe(7);
+        expect(gameState.players[0].position).toBe(11);
     });
 
     test('back_3 wraps from position 2 → position 39', () => {

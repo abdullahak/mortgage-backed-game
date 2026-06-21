@@ -1,22 +1,20 @@
-// Hotseat setup page logic
-
-let playerFieldCount = 2;
+const MAX_HOTSEAT_PLAYERS = 6;
 
 function addPlayerField() {
-    if (playerFieldCount >= 6) return;
-    playerFieldCount++;
+    const playerNumber = document.querySelectorAll('.player-name-input').length + 1;
+    if (playerNumber > MAX_HOTSEAT_PLAYERS) return;
 
     const container = document.getElementById('player-name-fields');
     const div = document.createElement('div');
     div.className = 'form-group';
     div.innerHTML = `
-        <label>Player ${playerFieldCount}</label>
+        <label>Player ${playerNumber}</label>
         <input type="text" class="player-name-input"
-               placeholder="Player ${playerFieldCount} name" maxlength="20">
+               placeholder="Player ${playerNumber} name" maxlength="20">
     `;
     container.appendChild(div);
 
-    if (playerFieldCount >= 6) {
+    if (playerNumber >= MAX_HOTSEAT_PLAYERS) {
         document.getElementById('add-player-btn').disabled = true;
     }
 }
@@ -49,17 +47,14 @@ async function startHotseatGame() {
     btn.textContent = 'Setting up game…';
 
     try {
-        // 1. Create one anonymous user per player
         const tokenRecords = [];
         for (const name of names) {
             const data = await apiFetch('/auth/anonymous', { method: 'POST' });
             tokenRecords.push({ userId: data.user.id, token: data.token, name });
         }
 
-        // 2. Activate player 1's session
         localStorage.setItem('auth_token', tokenRecords[0].token);
 
-        // 3. Create a room as player 1
         const room = await apiFetch('/rooms', {
             method: 'POST',
             body: JSON.stringify({
@@ -70,8 +65,7 @@ async function startHotseatGame() {
         });
         const roomId = room.id;
 
-        // 4. Join every other local player to the room so server-authoritative
-        // actions work when the active hotseat token changes.
+        // Server-authoritative actions need every local player joined with their own token.
         for (let i = 1; i < tokenRecords.length; i++) {
             localStorage.setItem('auth_token', tokenRecords[i].token);
             await apiFetch(`/rooms/${roomId}/join`, {
@@ -81,55 +75,11 @@ async function startHotseatGame() {
         }
         localStorage.setItem('auth_token', tokenRecords[0].token);
 
-        // 5. Build initial game state (mirrors startGameFromLobby in waiting.js)
-        const initialGameState = {
-            players: tokenRecords.map(record => ({
-                userId: record.userId,
-                name: record.name,
-                cash: 1500,
-                properties: [],
-                corporations: [],
-                debts: [],
-                netWorth: 1500,
-                bankrupt: false,
-                position: 0,
-                inJail: false,
-                jailTurns: 0,
-                hasGetOutOfJailCard: false,
-                doubleCount: 0,
-                diceRolled: false,
-            })),
-            currentPlayerIndex: 0,
-            properties: MONOPOLY_PROPERTIES.map((prop, i) => ({
-                ...prop,
-                id: `prop-${i}`,
-                ownerId: null,
-                ownerName: null,
-                houses: 0,
-            })),
-            corporations: [],
-            gameLog: [],
-            settings: {
-                interestRate: 5,
-                passGoAmount: 200
-            },
-            chanceCards: shuffleDeck(CHANCE_CARDS),
-            communityChestCards: shuffleDeck(COMMUNITY_CHEST_CARDS),
-            lastDiceRoll: null,
-            lastCardDrawn: null,
-        };
+        await startGame(roomId);
 
-        // 6. Create game record
-        const game = await apiFetch('/games', {
-            method: 'POST',
-            body: JSON.stringify({ room_id: roomId, game_state: initialGameState })
-        });
-
-        // 7. Store all player tokens in sessionStorage for game.js to pick up
         sessionStorage.setItem('hotseat_tokens', JSON.stringify(tokenRecords));
         saveHotseatResume(room, tokenRecords);
 
-        // 8. Navigate to the game
         window.location.href = `game.html?room=${roomId}`;
 
     } catch (err) {
@@ -141,7 +91,10 @@ async function startHotseatGame() {
     }
 }
 
-// Allow Enter key on last name field to submit
-document.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') startHotseatGame();
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('add-player-btn').addEventListener('click', addPlayerField);
+    document.getElementById('start-hotseat-btn').addEventListener('click', startHotseatGame);
+    document.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') startHotseatGame();
+    });
 });

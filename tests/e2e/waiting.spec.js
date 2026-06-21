@@ -1,9 +1,6 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
-const { loginPage } = require('./helpers');
-
-const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
-const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
+const { BASE, BASE_API, loginPage, playerState } = require('./helpers');
 
 test.describe('Waiting Room', () => {
     let hostToken, hostUserId, guestToken, guestUserId, room;
@@ -110,21 +107,7 @@ test.describe('Waiting Room', () => {
         })).json();
         const gameState = {
             currentPlayerIndex: 0,
-            players: joinedRoom.room_members.map(member => ({
-                userId: member.user_id,
-                name: member.player_name,
-                cash: 1500,
-                position: 0,
-                bankrupt: false,
-                inJail: false,
-                jailTurns: 0,
-                doubleCount: 0,
-                diceRolled: false,
-                hasGetOutOfJailCard: false,
-                properties: [],
-                corporations: [],
-                debts: [],
-            })),
+            players: joinedRoom.room_members.map(member => playerState(member.user_id, member.player_name)),
             properties: [],
             corporations: [],
             debts: [],

@@ -70,11 +70,11 @@
                         <input type="text" id="resume-code" class="code-input"
                                placeholder="ABCD12" maxlength="6"
                                aria-label="Room code">
-                        <button class="btn btn-primary" onclick="resumeWithCode()">Join Game</button>
+                        <button id="resume-code-btn" class="btn btn-primary">Join Game</button>
                     </div>
                     <div id="resume-error" class="resume-error" role="alert"></div>
                     <div id="hotseat-resume-options" class="hotseat-resume-options"></div>
-                    <a class="forgot-link" onclick="showForgotCode(event)" href="#">Forgot your code?</a>
+                    <a id="forgot-code-link" class="forgot-link" href="#">Forgot your code?</a>
 
                     <!-- Forgot code subform -->
                     <div id="forgot-code-form" class="forgot-subform">
@@ -82,11 +82,12 @@
                         <div class="input-row forgot-row">
                             <input type="email" id="forgot-email" class="email-input-field"
                                    placeholder="your@email.com">
-                            <button class="btn btn-primary" onclick="sendForgotCode()">Send Codes</button>
+                            <button id="send-forgot-code-btn" class="btn btn-primary">Send Codes</button>
                         </div>
                         <div id="forgot-success" class="forgot-success" role="status">
                             Check your email for your room codes!
                         </div>
+                        <div id="forgot-error" class="resume-error" role="alert"></div>
                     </div>
                 </div>
             </div><!-- /hero-content -->
@@ -203,7 +204,7 @@
                 <div class="step reveal">
                     <div class="step-number">1</div>
                     <h3>Enter Your Email</h3>
-                    <p>Click "Create New Game" — we'll send a magic link. No password needed.</p>
+                    <p>Click "Create New Game" — we'll send a one-time code. No password needed.</p>
                 </div>
                 <div class="step reveal reveal-delay-1">
                     <div class="step-number">2</div>
@@ -270,9 +271,7 @@
         </div>
     </footer>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="src/js/config.js?v=4"></script>
-    <script src="src/js/supabase.js?v=8"></script>
+    <script src="src/js/api.js?v=4"></script>
     <script>
         /* ── Nav: transparent over hero, glass when scrolled ── */
         const nav = document.getElementById('main-nav');
@@ -310,11 +309,18 @@
                     if (e.key === 'Enter') resumeWithCode();
                 });
             }
+
+            document.getElementById('resume-code-btn')?.addEventListener('click', resumeWithCode);
+            document.getElementById('forgot-code-link')?.addEventListener('click', (e) => {
+                e.preventDefault();
+                showForgotCode();
+            });
+            document.getElementById('send-forgot-code-btn')?.addEventListener('click', sendForgotCode);
         });
 
         /* ── Resume game functionality ── */
         function resumeWithCode() {
-            const code = document.getElementById('resume-code').value.trim().toUpperCase();
+            const code = normalizeInviteCode(document.getElementById('resume-code').value);
             const errorEl = document.getElementById('resume-error');
             if (!code || code.length < 4) {
                 errorEl.textContent = 'Please enter a valid room code.';
@@ -331,17 +337,31 @@
             window.location.href = `waiting.html?code=${encodeURIComponent(code)}`;
         }
 
-        function showForgotCode(e) {
-            e.preventDefault();
+        function showForgotCode() {
             document.getElementById('forgot-code-form').style.display = 'block';
+            return false;
         }
 
         async function sendForgotCode() {
             const email = document.getElementById('forgot-email').value.trim();
             const successEl = document.getElementById('forgot-success');
-            if (!email) return;
-            await callSendRoomCode({ action: 'forgot_code', email });
-            successEl.style.display = 'block';
+            const errorEl = document.getElementById('forgot-error');
+            successEl.style.display = 'none';
+            errorEl.style.display = 'none';
+
+            if (!email) {
+                errorEl.textContent = 'Please enter your email.';
+                errorEl.style.display = 'block';
+                return;
+            }
+
+            try {
+                await sendForgotRoomCodes(email);
+                successEl.style.display = 'block';
+            } catch (err) {
+                errorEl.textContent = err.message || 'Could not send room codes. Please try again.';
+                errorEl.style.display = 'block';
+            }
         }
     </script>
 </body>

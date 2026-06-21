@@ -67,11 +67,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Load game and room data
 async function loadGameData(roomId) {
     try {
-        console.log('Loading game data for room:', roomId);
-
         // Load room data
         const room = await apiFetch(`/rooms/${roomId}`);
-        console.log('Room loaded:', room);
         if (!room) throw new Error('Room not found');
 
         currentRoom = room;
@@ -81,17 +78,14 @@ async function loadGameData(roomId) {
 
         // Load game data
         const game = await apiFetch(`/games/by-room/${roomId}`);
-        console.log('Game loaded:', game);
         if (!game) throw new Error('Game not found for this room');
 
         currentGame = game;
 
         // Find current player data
         const gameState = game.game_state;
-        console.log('Game state:', gameState);
 
         currentPlayerData = gameState.players.find(p => p.userId === currentUser.id);
-        console.log('Current player data:', currentPlayerData);
 
         if (!currentPlayerData) {
             throw new Error('You are not a player in this game');
@@ -121,8 +115,8 @@ function setupRealtimeSubscriptions() {
 
 async function applyGameUpdate(game, options = {}) {
     if (!game || !game.game_state) return;
-    const incomingVersion = Number(game.state_version ?? game.stateVersion ?? 0);
-    const currentVersion = Number(currentGame?.state_version ?? currentGame?.stateVersion ?? -1);
+    const incomingVersion = Number(game.state_version ?? 0);
+    const currentVersion = Number(currentGame?.state_version ?? -1);
     if (!options.force && incomingVersion < currentVersion) return;
 
     currentGame = game;
@@ -274,13 +268,13 @@ function renderAuctionPanel(gameState) {
             ${canAct ? `
                 <div class="auction-actions">
                     <input type="number" id="auctionBidAmount" min="${minBid}" step="1" value="${minBid}" aria-label="Auction bid amount">
-                    <button class="btn btn-success btn-sm" onclick="placeAuctionBid()">Bid</button>
-                    <button class="btn btn-secondary btn-sm" onclick="passAuction()">Pass</button>
+                    <button class="btn btn-success btn-sm" data-game-action="place-auction-bid">Bid</button>
+                    <button class="btn btn-secondary btn-sm" data-game-action="pass-auction">Pass</button>
                 </div>
             ` : ''}
             ${isHost ? `
                 <div class="auction-host-actions">
-                    <button class="btn btn-danger btn-sm" onclick="hostCancelAuction()">Cancel Auction</button>
+                    <button class="btn btn-danger btn-sm" data-game-action="host-cancel-auction">Cancel Auction</button>
                 </div>
             ` : ''}
         </div>
@@ -299,11 +293,14 @@ function formatAuctionExpiry(expiresAt) {
 function renderTurnChecklist(gameState, currentPlayer, landing, isMyTurn) {
     const hasRolled = !!currentPlayer.diceRolled;
     const ended = !!gameState.ended;
+    const waitingForJailChoice = currentPlayer.inJail && !hasRolled;
     const items = [
         {
-            label: 'Roll',
+            label: waitingForJailChoice ? 'Jail' : 'Roll',
             state: hasRolled ? 'complete' : (isMyTurn ? 'current' : 'upcoming'),
-            detail: hasRolled ? formatDiceLabel(gameState.lastDiceRoll) : 'Waiting for dice',
+            detail: hasRolled
+                ? formatDiceLabel(gameState.lastDiceRoll)
+                : (waitingForJailChoice ? 'Roll doubles, pay fine, or use card' : 'Waiting for dice'),
         },
         {
             label: 'Resolve',
@@ -412,9 +409,194 @@ function deckDisplayName(deckType) {
     return 'Card';
 }
 
+const PROPERTY_GROUP_SIZES = {
+    'Brown': 2,
+    'Light Blue': 3,
+    'Pink': 3,
+    'Orange': 3,
+    'Red': 3,
+    'Yellow': 3,
+    'Green': 3,
+    'Dark Blue': 2,
+    'Railroad': 4,
+    'Utility': 2,
+};
+
+function getOwnedPropertyDetails(player) {
+    const allProperties = currentGame?.game_state?.properties || [];
+    const playerProperties = Array.isArray(player.properties) ? player.properties : [];
+    const ownedFromState = allProperties.filter(prop => prop.ownerId === player.userId);
+
+    const properties = ownedFromState.length || !playerProperties.length
+        ? ownedFromState
+        : playerProperties.map(prop => {
+            const fullProperty = allProperties.find(item => item.id === prop.id) || {};
+            return { ...fullProperty, ...prop, ownerId: player.userId, ownerName: player.name };
+        });
+
+    return properties
+        .map(prop => ({
+            ...prop,
+            houses: Number(prop.houses || 0),
+            price: Number(prop.price ?? prop.value ?? 0),
+        }))
+        .sort((a, b) => getPropertyBoardPosition(a.id) - getPropertyBoardPosition(b.id));
+}
+
+function getPropertyBoardPosition(propertyId) {
+    const square = (typeof BOARD_SQUARES !== 'undefined' ? BOARD_SQUARES : [])
+        .find(item => item.propertyId === propertyId);
+    return square ? square.position : 999;
+}
+
+function propertyAssetValue(property) {
+    if (property.value != null && Number.isFinite(Number(property.value))) {
+        return Number(property.value);
+    }
+    return Number(property.price || 0) + Number(property.houses || 0) * (HOUSE_COSTS[property.color] || 0);
+}
+
+function getPropertyColorValue(color) {
+    if (typeof PROP_COLORS !== 'undefined' && PROP_COLORS[color]) return PROP_COLORS[color];
+    if (color && !color.includes(' ')) return color;
+    return '#64748b';
+}
+
+function getReadableTextColor(colorValue) {
+    const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(colorValue || '');
+    if (!match) return '#ffffff';
+    const r = parseInt(match[1], 16);
+    const g = parseInt(match[2], 16);
+    const b = parseInt(match[3], 16);
+    return ((r * 299 + g * 587 + b * 114) / 1000) > 150 ? '#1f2933' : '#ffffff';
+}
+
+function getPropertyKind(property) {
+    if (property.color === 'Railroad') return 'Railroad';
+    if (property.color === 'Utility') return 'Utility';
+    return 'Street';
+}
+
+function getPropertyTypeLabel(property) {
+    const kind = getPropertyKind(property);
+    if (kind !== 'Street') return kind;
+    return `${property.color || 'Property'} street`;
+}
+
+function getPropertyIconHtml(property) {
+    const kind = getPropertyKind(property).toLowerCase();
+    const icon = kind === 'railroad' ? 'RR' : (kind === 'utility' ? '&#9889;' : '');
+    return `<span class="owned-property-icon type-${kind}" aria-hidden="true">${icon}</span>`;
+}
+
+function getPropertyGroupStatus(property, allProperties, ownedProperties, ownerId) {
+    const color = property.color || 'Property';
+    const fullGroup = allProperties.filter(prop => prop.color === color);
+    const total = fullGroup.length || PROPERTY_GROUP_SIZES[color] || 1;
+    const owned = fullGroup.length
+        ? fullGroup.filter(prop => prop.ownerId === ownerId).length
+        : ownedProperties.filter(prop => prop.color === color).length;
+    const complete = total > 0 && owned === total;
+    const kind = getPropertyKind(property);
+    const label = complete
+        ? (kind === 'Street' ? 'Monopoly' : 'Complete set')
+        : `${owned}/${total} set`;
+    return { owned, total, complete, label };
+}
+
+function getPropertyDevelopmentLabel(property) {
+    const houses = Number(property.houses || 0);
+    if (getPropertyKind(property) !== 'Street') return 'No buildings';
+    if (houses === 5) return 'Hotel';
+    if (houses > 0) return `${houses} house${houses === 1 ? '' : 's'}`;
+    return 'No houses';
+}
+
+function renderDevelopmentIcons(property) {
+    const houses = Number(property.houses || 0);
+    if (getPropertyKind(property) !== 'Street') {
+        return '<span class="building-na" aria-hidden="true"></span>';
+    }
+    if (houses === 5) {
+        return '<span class="hotel-pip" aria-hidden="true"></span>';
+    }
+    if (houses > 0) {
+        return Array.from({ length: houses }, () => '<span class="house-pip" aria-hidden="true"></span>').join('');
+    }
+    return '<span class="empty-house-pip" aria-hidden="true"></span>';
+}
+
+function getPropertyRentLabel(property, allProperties, ownedProperties, ownerId) {
+    const groupStatus = getPropertyGroupStatus(property, allProperties, ownedProperties, ownerId);
+    const rent = Array.isArray(property.rent) ? property.rent : [];
+    if (property.color === 'Utility') {
+        return `Rent ${groupStatus.complete ? '10x' : '4x'} dice`;
+    }
+    if (property.color === 'Railroad') {
+        return `Rent $${Number(rent[Math.max(0, groupStatus.owned - 1)] || rent[0] || 0)}`;
+    }
+
+    const houses = Number(property.houses || 0);
+    const baseRent = Number(rent[0] || 0);
+    const currentRent = houses > 0
+        ? Number(rent[houses] || baseRent)
+        : (groupStatus.complete ? baseRent * 2 : baseRent);
+    return `Rent $${currentRent}`;
+}
+
+function renderOwnedProperties(player, ownedProperties) {
+    if (!ownedProperties.length) return '';
+    const allProperties = currentGame?.game_state?.properties || [];
+    const totalValue = ownedProperties.reduce((sum, prop) => sum + propertyAssetValue(prop), 0);
+
+    return `
+        <div class="player-properties">
+            <div class="player-section-heading">
+                <h4>Properties</h4>
+                <span>${ownedProperties.length} owned &middot; $${totalValue.toFixed(0)} value</span>
+            </div>
+            <div class="owned-property-list">
+                ${ownedProperties.map(property => {
+                    const color = getPropertyColorValue(property.color);
+                    const ink = getReadableTextColor(color);
+                    const groupStatus = getPropertyGroupStatus(property, allProperties, ownedProperties, player.userId);
+                    const typeLabel = getPropertyTypeLabel(property);
+                    const developmentLabel = getPropertyDevelopmentLabel(property);
+                    const rentLabel = getPropertyRentLabel(property, allProperties, ownedProperties, player.userId);
+                    const groupClass = groupStatus.complete ? 'complete' : 'partial';
+
+                    return `
+                        <div class="owned-property-row" style="--property-color:${escapeAttr(color)};--property-ink:${escapeAttr(ink)};">
+                            ${getPropertyIconHtml(property)}
+                            <div class="owned-property-copy">
+                                <div class="owned-property-title">
+                                    <strong>${escapeHtml(property.name)}</strong>
+                                </div>
+                                <div class="owned-property-meta">
+                                    <span>${escapeHtml(typeLabel)}</span>
+                                    <span>Value $${propertyAssetValue(property).toFixed(0)}</span>
+                                </div>
+                                <div class="owned-property-chips">
+                                    <span class="owned-property-chip set-chip ${groupClass}">${escapeHtml(groupStatus.label)}</span>
+                                    <span class="owned-property-chip development-chip">
+                                        <span class="development-icons">${renderDevelopmentIcons(property)}</span>
+                                        ${escapeHtml(developmentLabel)}
+                                    </span>
+                                    <span class="owned-property-chip rent-chip">${escapeHtml(rentLabel)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    `;
+}
+
 // Render individual player card
 function renderPlayerCard(player, isCurrentUser) {
-    const totalPropertyValue = player.properties.reduce((sum, p) => sum + p.value, 0);
+    const ownedProperties = getOwnedPropertyDetails(player);
+    const totalPropertyValue = ownedProperties.reduce((sum, p) => sum + propertyAssetValue(p), 0);
     const corporationValue = getPlayerCorporationValue(player);
     const debtTotal = getDebtTotal(player.debts);
     const netWorth = player.cash + totalPropertyValue + corporationValue - debtTotal;
@@ -430,7 +612,7 @@ function renderPlayerCard(player, isCurrentUser) {
             </div>
             <div class="stat">
                 <span class="stat-label">Properties:</span>
-                <span class="stat-value">${player.properties.length}</span>
+                <span class="stat-value">${ownedProperties.length}</span>
             </div>
             <div class="stat">
                 <span class="stat-label">Net Worth:</span>
@@ -442,17 +624,8 @@ function renderPlayerCard(player, isCurrentUser) {
             <div><span>Received this turn</span><strong>$${cashFlow.received.toFixed(2)}</strong></div>
             <div><span>Received between turns</span><strong>$${cashFlow.receivedBetweenTurns.toFixed(2)}</strong></div>
         </div>
-        ${player.properties.length > 0 ? `
-            <div class="player-properties">
-                <h4>Properties:</h4>
-                <div class="property-badges">
-                    ${player.properties.map(p => `
-                        <span class="property-badge" style="background-color: ${p.color}">
-                            ${p.name}
-                        </span>
-                    `).join('')}
-                </div>
-            </div>
+        ${ownedProperties.length > 0 ? `
+            ${renderOwnedProperties(player, ownedProperties)}
         ` : ''}
         ${player.corporations.length > 0 ? `
             <div class="player-corporations">
@@ -495,7 +668,7 @@ function renderPlayerCard(player, isCurrentUser) {
 
     return `
         <div class="player-card player-card-other collapsed ${cardClass}" data-player-id="${player.userId}">
-            <div class="player-card-summary" onclick="togglePlayerCard(this)">
+            <div class="player-card-summary">
                 <span class="player-name-sm">${escapeHtml(player.name)}</span>
                 ${bankruptBadge}
                 <span class="player-stat-sm">$${player.cash.toFixed(0)}</span>
@@ -504,7 +677,7 @@ function renderPlayerCard(player, isCurrentUser) {
             </div>
             <div class="player-card-details" style="display:none;">
                 <div class="player-header">
-                    <h3>${player.name}</h3>
+                    <h3>${escapeHtml(player.name)}</h3>
                 </div>
                 ${cardDetails}
             </div>
@@ -626,20 +799,27 @@ function renderActionButtons() {
     const landing = getLandingSummary(gameState, currentPlayer);
     const endTurnLabel = Number(currentPlayer.cash || 0) < 0 || getBankruptcyClaimForPlayer(currentPlayer.userId) ? 'Declare Bankruptcy' : 'End Turn';
     const auctionOpen = gameState.auction?.status === 'open';
+    const waitingForJailChoice = currentPlayer.inJail && !hasRolled;
+    const rollButtonLabel = waitingForJailChoice ? '🎲 Roll for Doubles' : '🎲 Roll Dice';
+    const jailChoiceButtons = waitingForJailChoice ? `
+        <button class="btn btn-warning btn-sm" data-game-action="pay-jail-fine">Pay $50 Fine</button>
+        ${currentPlayer.hasGetOutOfJailCard ? '<button class="btn btn-success btn-sm" data-game-action="use-jail-card">Use Jail Card</button>' : ''}
+    ` : '';
     const buyButton = landing.canBuy
-        ? '<button class="btn btn-success btn-sm action-btn-buy" onclick="openBuyPropertyModal()">Buy Property</button>'
+        ? '<button class="btn btn-success btn-sm action-btn-buy" data-game-action="open-buy-property">Buy Property</button>'
         : `<button class="btn btn-secondary btn-sm action-btn-buy" disabled title="${escapeHtml(landing.detail)}">${escapeHtml(buyUnavailableLabel(landing))}</button>`;
     return `
         <div class="action-buttons">
-            ${!hasRolled ? '<button class="btn btn-primary" style="margin-bottom:8px;width:100%;" onclick="rollDiceAndMove()">🎲 Roll Dice</button>' : ''}
+            ${!hasRolled ? `<button class="btn btn-primary" style="margin-bottom:8px;width:100%;" data-game-action="roll-dice">${rollButtonLabel}</button>` : ''}
             <div class="action-btn-secondary-group">
+                ${jailChoiceButtons}
                 ${auctionOpen ? '<button class="btn btn-secondary btn-sm action-btn-buy" disabled>Auction Open</button>' : buyButton}
-                <button class="btn btn-secondary btn-sm" onclick="openIPOModal()" ${auctionOpen ? 'disabled' : ''}>Create IPO</button>
-                <button class="btn btn-secondary btn-sm" onclick="openDebtModal()" ${auctionOpen ? 'disabled' : ''}>Manage Debt</button>
-                <button class="btn btn-secondary btn-sm" onclick="openCorporationModal()">Corporations</button>
-                <button class="btn btn-success action-btn-end-turn" onclick="endTurn()" ${!hasRolled || auctionOpen ? `disabled title="${auctionOpen ? 'Resolve auction before ending your turn' : 'Roll before ending your turn'}"` : ''}>${escapeHtml(auctionOpen ? 'Resolve Auction' : endTurnLabel)}</button>
-                ${isHost ? '<button class="btn btn-warning btn-sm" onclick="hostPauseGame()">Pause Game</button>' : ''}
-                ${isHost ? '<button class="btn btn-danger btn-sm" onclick="hostEndGame()">End Game</button>' : ''}
+                <button class="btn btn-secondary btn-sm" data-game-action="open-ipo" ${auctionOpen ? 'disabled' : ''}>Create IPO</button>
+                <button class="btn btn-secondary btn-sm" data-game-action="open-debt" ${auctionOpen ? 'disabled' : ''}>Manage Debt</button>
+                <button class="btn btn-secondary btn-sm" data-game-action="open-corporation">Corporations</button>
+                <button class="btn btn-success action-btn-end-turn" data-game-action="end-turn" ${!hasRolled || auctionOpen ? `disabled title="${auctionOpen ? 'Resolve auction before ending your turn' : 'Roll before ending your turn'}"` : ''}>${escapeHtml(auctionOpen ? 'Resolve Auction' : endTurnLabel)}</button>
+                ${isHost ? '<button class="btn btn-warning btn-sm" data-game-action="host-pause">Pause Game</button>' : ''}
+                ${isHost ? '<button class="btn btn-danger btn-sm" data-game-action="host-end">End Game</button>' : ''}
             </div>
         </div>
     `;
@@ -656,9 +836,9 @@ function renderNonTurnActions() {
     return `
         <div class="action-buttons">
             <div class="action-btn-secondary-group">
-                <button class="btn btn-secondary btn-sm" onclick="openCorporationModal()">Corporations</button>
-                ${isHost ? '<button class="btn btn-warning btn-sm" onclick="hostPauseGame()">Pause Game</button>' : ''}
-                ${isHost ? '<button class="btn btn-danger btn-sm" onclick="hostEndGame()">End Game</button>' : ''}
+                <button class="btn btn-secondary btn-sm" data-game-action="open-corporation">Corporations</button>
+                ${isHost ? '<button class="btn btn-warning btn-sm" data-game-action="host-pause">Pause Game</button>' : ''}
+                ${isHost ? '<button class="btn btn-danger btn-sm" data-game-action="host-end">End Game</button>' : ''}
             </div>
         </div>
     `;
@@ -669,9 +849,9 @@ function renderPausedActions() {
     return `
         <div class="action-buttons paused-actions">
             <div class="action-btn-secondary-group">
-                <button class="btn btn-secondary btn-sm" onclick="openCorporationModal()">Corporations</button>
-                ${isHost ? '<button class="btn btn-success btn-sm" onclick="hostResumeGame()">Resume Game</button>' : ''}
-                ${isHost ? '<button class="btn btn-danger btn-sm" onclick="hostEndGame()">End Game</button>' : ''}
+                <button class="btn btn-secondary btn-sm" data-game-action="open-corporation">Corporations</button>
+                ${isHost ? '<button class="btn btn-success btn-sm" data-game-action="host-resume">Resume Game</button>' : ''}
+                ${isHost ? '<button class="btn btn-danger btn-sm" data-game-action="host-end">End Game</button>' : ''}
             </div>
         </div>
     `;
@@ -706,6 +886,8 @@ function formatLogEvent(type, data) {
             return `${data.actor ? `${data.actor} issued` : `${data.issuer} issued`} debt${data.actor ? ` under ${data.issuer}` : ''} of $${Number(data.amount).toFixed(2)} at ${data.interestRate}% interest`;
         case 'debt_payment':
             return `${data.payer} paid $${Number(data.amount).toFixed(2)} towards their debt`;
+        case 'debt_refinanced':
+            return `${data.borrower} refinanced ${data.refinancedDebtCount} debt(s) into $${Number(data.amount).toFixed(2)} at ${data.interestRate}% interest and received $${Number(data.netProceeds || 0).toFixed(2)} net cash`;
         case 'interest_accrual':
             return `${data.player} was charged $${Number(data.interestCharged).toFixed(2)} in interest`;
         case 'corporation_insolvent': {
@@ -723,6 +905,10 @@ function formatLogEvent(type, data) {
                 return `${data.from} owed $${Number(data.amountOwed || 0).toFixed(2)} to ${data.to}${data.reason ? ` for ${data.reason}` : ''}; paid $${Number(data.amount || 0).toFixed(2)}, $${Number(data.unpaidAmount || 0).toFixed(2)} unpaid`;
             }
             return `${data.from} paid $${Number(data.amount).toFixed(2)} to ${data.to}${data.reason ? ` for ${data.reason}` : ''}`;
+        case 'jail_fine_paid':
+            return `${data.player} paid $${Number(data.amount).toFixed(2)} to leave Jail`;
+        case 'jail_card_used':
+            return `${data.player} used a Get Out of Jail Free card`;
         case 'tax_payment':
             return `${data.from} paid $${Number(data.amount).toFixed(2)} to ${data.to}${data.reason ? ` for ${data.reason}` : ''}`;
         case 'bankruptcy_claim_payment':
@@ -769,6 +955,8 @@ function formatLogEvent(type, data) {
         case 'property_auction_canceled':
             return `${data.actor} canceled the auction for ${data.property}`;
         case 'dice_roll':
+            if (data.sentToJail) return `${data.player} rolled ${data.die1}+${data.die2}=${data.total} — sent to Jail`;
+            if (data.inJail) return `${data.player} rolled ${data.die1}+${data.die2}=${data.total} and stayed in Jail`;
             return `${data.player} rolled ${data.die1}+${data.die2}=${data.total} — moved to ${data.square}${data.isDoubles ? ' (doubles!)' : ''}`;
         case 'card_draw':
             return `${data.player} drew ${deckDisplayName(data.deckType)}: "${data.card}"${data.effect ? ` Applied: ${data.effect}.` : ''}`;
@@ -826,7 +1014,7 @@ async function openBuyPropertyModal() {
     }
 
     const propertiesHtml = `
-        <div class="property-card selected" onclick="selectProperty('${property.id}')" data-property-id="${property.id}">
+        <div class="property-card selected" data-property-id="${escapeAttr(property.id)}">
             <div class="property-color" style="background-color: ${property.color}"></div>
             <div class="property-name">${escapeHtml(property.name)}</div>
             <div class="property-price">$${property.price}</div>
@@ -847,7 +1035,9 @@ function selectProperty(propertyId) {
     document.querySelectorAll('.property-card').forEach(card => {
         card.classList.remove('selected');
     });
-    document.querySelector(`[data-property-id="${propertyId}"]`).classList.add('selected');
+    const selectedCard = Array.from(document.querySelectorAll('.property-card'))
+        .find(card => card.dataset.propertyId === propertyId);
+    if (selectedCard) selectedCard.classList.add('selected');
 
     const property = currentGame.game_state.properties.find(p => p.id === propertyId);
     document.getElementById('purchasePrice').value = property.price;
@@ -937,8 +1127,8 @@ async function hostCancelAuction() {
 async function openIPOModal() {
     const assetsHtml = currentPlayerData.properties.map(p => `
         <div class="asset-checkbox">
-            <input type="checkbox" id="ipo-asset-${p.id}" value="${p.id}">
-            <label for="ipo-asset-${p.id}">${escapeHtml(p.name)} ($${p.value})</label>
+            <input type="checkbox" id="ipo-asset-${escapeAttr(p.id)}" value="${escapeAttr(p.id)}">
+            <label for="ipo-asset-${escapeAttr(p.id)}">${escapeHtml(p.name)} ($${p.value})</label>
         </div>
     `).join('');
 
@@ -986,22 +1176,20 @@ async function openDebtModal() {
     document.getElementById('loanRate').value = String(rate);
     document.getElementById('loanRateDisplay').textContent = `${rate}% per turn`;
     document.getElementById('debtIssuer').innerHTML = debtIssuerOptionsHtml();
+    document.getElementById('loanAmount').value = '';
+    document.getElementById('settlementAmount').value = '';
+    document.getElementById('refinanceAmount').value = '';
     renderDebtCollateralOptions();
+    renderSettleDebtOptions();
+    renderRefinanceDebtOptions();
     toggleDebtForm();
-
-    // Load existing debts
-    const debtsHtml = currentPlayerData.debts.map((d, index) => `
-        <option value="${index}">Loan #${index + 1}: $${d.principal.toFixed(2)} @ ${d.interestRate}%</option>
-    `).join('');
-
-    document.getElementById('debtToSettle').innerHTML = debtsHtml || '<option value="">No debts to settle</option>';
 
     openModal('debtModal');
 }
 
 function debtIssuerOptionsHtml() {
     const corporationOptions = getEligibleDebtCorporations().map(corp =>
-        `<option value="corporation:${corp.id}">${escapeHtml(corp.ticker)} Corporation</option>`
+        `<option value="corporation:${escapeAttr(corp.id)}">${escapeHtml(corp.ticker)} Corporation</option>`
     );
     return [
         '<option value="player">Personal</option>',
@@ -1028,25 +1216,134 @@ function renderDebtCollateralOptions() {
         assets = corp ? (corp.assets || []) : [];
     }
 
-    const assetsHtml = assets.map(p => `
+    renderCollateralAssetList('collateralAssets', assets);
+}
+
+function renderCollateralAssetList(containerId, assets, selectedIds = new Set()) {
+    const assetsHtml = assets.map(p => {
+        const checkboxId = `${containerId}-${p.id}`;
+        const checked = selectedIds.has(p.id) ? ' checked' : '';
+        return `
         <div class="asset-checkbox">
-            <input type="checkbox" id="collateral-${p.id}" value="${p.id}">
-            <label for="collateral-${p.id}">${escapeHtml(p.name)} ($${Number(p.value || p.price || 0).toFixed(2)})</label>
+            <input type="checkbox" id="${escapeAttr(checkboxId)}" value="${escapeAttr(p.id)}"${checked}>
+            <label for="${escapeAttr(checkboxId)}">${escapeHtml(p.name)} ($${Number(p.value || p.price || 0).toFixed(2)})</label>
+        </div>
+    `;
+    }).join('');
+
+    document.getElementById(containerId).innerHTML = assetsHtml || '<p class="empty-state">No collateral assets available</p>';
+}
+
+function renderSettleDebtOptions() {
+    const debtsHtml = getPersonalDebts().map((debt, index) => `
+        <option value="${index}">${debtOptionLabel(debt, index)}</option>
+    `).join('');
+
+    document.getElementById('debtToSettle').innerHTML = debtsHtml || '<option value="">No debts to settle</option>';
+    updateSettlementFullAmountState();
+}
+
+function renderRefinanceDebtOptions() {
+    const debts = getPersonalDebts();
+    const debtsHtml = debts.map((debt, index) => `
+        <div class="asset-checkbox debt-choice">
+            <input type="checkbox" id="refinance-debt-${index}" value="${index}" data-debt-id="${escapeAttr(debt.id || '')}">
+            <label for="refinance-debt-${index}">
+                ${debtOptionLabel(debt, index)}
+                ${debtCollateralText(debt)}
+            </label>
         </div>
     `).join('');
 
-    document.getElementById('collateralAssets').innerHTML = assetsHtml || '<p class="empty-state">No collateral assets available</p>';
+    document.getElementById('debtsToRefinance').innerHTML = debtsHtml || '<p class="empty-state">No debts to refinance</p>';
+    renderRefinanceCollateralOptions();
+    updateRefinanceSummary();
+}
+
+function getPersonalDebts() {
+    return Array.isArray(currentPlayerData?.debts) ? currentPlayerData.debts : [];
+}
+
+function debtPrincipal(debt) {
+    return Number(debt?.principal || 0);
+}
+
+function debtOptionLabel(debt, index) {
+    return `Loan #${index + 1}: $${debtPrincipal(debt).toFixed(2)} @ ${Number(debt?.interestRate || 0)}%`;
+}
+
+function debtCollateralText(debt) {
+    const collateral = Array.isArray(debt?.collateral) ? debt.collateral : [];
+    if (!collateral.length) return '';
+    const names = collateral.map(asset => escapeHtml(asset.name || asset.id || 'Asset')).join(', ');
+    return `<span class="debt-detail">Backed by: ${names}</span>`;
+}
+
+function getSelectedRefinanceDebtItems() {
+    const debts = getPersonalDebts();
+    return Array.from(document.querySelectorAll('#debtsToRefinance input:checked'))
+        .map(input => Number(input.value))
+        .filter(index => Number.isInteger(index) && debts[index])
+        .map(index => ({ index, debt: debts[index] }));
+}
+
+function getRefinancePayoffAmount() {
+    return getSelectedRefinanceDebtItems()
+        .reduce((sum, item) => sum + debtPrincipal(item.debt), 0);
+}
+
+function renderRefinanceCollateralOptions() {
+    const selectedCollateralIds = new Set();
+    getSelectedRefinanceDebtItems().forEach(item => {
+        (Array.isArray(item.debt.collateral) ? item.debt.collateral : []).forEach(asset => {
+            if (asset?.id) selectedCollateralIds.add(asset.id);
+        });
+    });
+    renderCollateralAssetList('refinanceCollateralAssets', currentPlayerData.properties || [], selectedCollateralIds);
+}
+
+function updateSettlementFullAmountState() {
+    const debtIndex = parseInt(document.getElementById('debtToSettle').value, 10);
+    const debt = getPersonalDebts()[debtIndex];
+    const button = document.getElementById('payFullDebtBtn');
+    if (!button) return;
+    button.disabled = !debt;
+}
+
+function fillFullSettlementAmount() {
+    const debtIndex = parseInt(document.getElementById('debtToSettle').value, 10);
+    const debt = getPersonalDebts()[debtIndex];
+    if (!debt) return;
+    const input = document.getElementById('settlementAmount');
+    input.value = debtPrincipal(debt).toFixed(2);
+    input.focus();
+}
+
+function updateRefinanceSummary() {
+    const summary = document.getElementById('refinanceSummary');
+    if (!summary) return;
+    const selectedCount = getSelectedRefinanceDebtItems().length;
+    const payoffAmount = getRefinancePayoffAmount();
+    const newLoanAmount = parseFloat(document.getElementById('refinanceAmount').value);
+    const netCash = Number.isFinite(newLoanAmount) ? newLoanAmount - payoffAmount : 0;
+    summary.classList.toggle('debt-flow-warning', selectedCount > 0 && Number.isFinite(newLoanAmount) && netCash <= 0);
+
+    if (!selectedCount) {
+        summary.textContent = 'Selected payoff: $0.00';
+        return;
+    }
+
+    const netText = Number.isFinite(newLoanAmount) ? `$${netCash.toFixed(2)}` : '$0.00';
+    summary.textContent = `Selected payoff: $${payoffAmount.toFixed(2)} | Net new cash: ${netText}`;
 }
 
 function toggleDebtForm() {
     const action = document.getElementById('debtAction').value;
-    if (action === 'issue') {
-        document.getElementById('issueDebtForm').style.display = 'block';
-        document.getElementById('settleDebtForm').style.display = 'none';
-    } else {
-        document.getElementById('issueDebtForm').style.display = 'none';
-        document.getElementById('settleDebtForm').style.display = 'block';
-    }
+    document.getElementById('issueDebtForm').style.display = action === 'issue' ? 'block' : 'none';
+    document.getElementById('settleDebtForm').style.display = action === 'settle' ? 'block' : 'none';
+    document.getElementById('refinanceDebtForm').style.display = action === 'refinance' ? 'block' : 'none';
+    if (action === 'settle') updateSettlementFullAmountState();
+    if (action === 'refinance') updateRefinanceSummary();
 }
 
 async function processDebt() {
@@ -1054,8 +1351,10 @@ async function processDebt() {
 
     if (action === 'issue') {
         await issueDebt();
-    } else {
+    } else if (action === 'settle') {
         await settleDebt();
+    } else if (action === 'refinance') {
+        await refinanceDebt();
     }
 }
 
@@ -1091,7 +1390,7 @@ async function issueDebt() {
 }
 
 async function settleDebt() {
-    const debtIndex = parseInt(document.getElementById('debtToSettle').value);
+    const debtIndex = parseInt(document.getElementById('debtToSettle').value, 10);
     const paymentAmount = parseFloat(document.getElementById('settlementAmount').value);
 
     if (isNaN(debtIndex) || !paymentAmount) {
@@ -1116,6 +1415,44 @@ async function settleDebt() {
     } catch (error) {
         console.error('Error settling debt:', error);
         alert('Failed to settle debt');
+    }
+}
+
+async function refinanceDebt() {
+    const selectedItems = getSelectedRefinanceDebtItems();
+    const refinanceAmount = parseFloat(document.getElementById('refinanceAmount').value);
+    const payoffAmount = getRefinancePayoffAmount();
+
+    if (!selectedItems.length) {
+        alert('Please select at least one debt to refinance');
+        return;
+    }
+
+    if (!refinanceAmount) {
+        alert('Please enter a new loan amount');
+        return;
+    }
+
+    if (refinanceAmount <= payoffAmount) {
+        alert('New loan amount must be greater than the selected payoff amount');
+        return;
+    }
+
+    const selectedCollateral = Array.from(document.querySelectorAll('#refinanceCollateralAssets input:checked'))
+        .map(cb => cb.value);
+
+    try {
+        await performGameAction('refinance_debt', {
+            amount: refinanceAmount,
+            debtIds: selectedItems.map(item => item.debt.id).filter(Boolean),
+            debtIndexes: selectedItems.map(item => item.index),
+            collateralIds: selectedCollateral,
+        });
+        closeModal('debtModal');
+
+    } catch (error) {
+        console.error('Error refinancing debt:', error);
+        alert('Failed to refinance debt');
     }
 }
 
@@ -1179,8 +1516,8 @@ async function openCorporationModal() {
             ${canBuy ? `
                 <div class="buy-shares-form" style="margin-top: 10px; padding: 10px; background: #f0f4ff; border-radius: 6px;">
                     <label>${buyLabel} (max ${buyableShares}):</label>
-                    <input type="number" id="buyShares-${corp.id}" min="1" max="${buyableShares}" value="1" style="width: 80px; margin: 0 8px;">
-                    <button class="btn btn-primary" style="padding: 4px 12px; font-size: 0.9rem;" onclick="buyShares('${corp.id}')">Buy</button>
+                    <input type="number" id="buyShares-${escapeAttr(corp.id)}" min="1" max="${buyableShares}" value="1" style="width: 80px; margin: 0 8px;">
+                    <button class="btn btn-primary" style="padding: 4px 12px; font-size: 0.9rem;" data-game-action="buy-shares" data-corp-id="${escapeAttr(corp.id)}">Buy</button>
                 </div>
             ` : ''}
         </div>
@@ -1203,7 +1540,7 @@ function renderChairmanGovernance(corp) {
     const myShares = sharesForUi(corp, currentUser.id);
     const candidates = chairmanCandidateOptions(corp);
     const voteOptions = candidates.map(player =>
-        `<option value="${player.userId}">${escapeHtml(player.name)}</option>`
+        `<option value="${escapeAttr(player.userId)}">${escapeHtml(player.name)}</option>`
     ).join('');
     const required = majorityThresholdUi(corp);
     const openVotes = (corp.chairmanVotes || []).filter(vote => vote.status === 'open');
@@ -1218,7 +1555,7 @@ function renderChairmanGovernance(corp) {
                         <strong>${escapeHtml(vote.candidateName)}</strong>
                         <span>${supportedShares}/${corp.totalShares} shares supporting, ${required} needed</span>
                     </div>
-                    ${canSupport ? `<button class="btn btn-primary btn-sm" onclick="supportChairmanVote('${corp.id}', '${vote.id}')">Support</button>` : ''}
+                    ${canSupport ? `<button class="btn btn-primary btn-sm" data-game-action="support-chairman-vote" data-corp-id="${escapeAttr(corp.id)}" data-vote-id="${escapeAttr(vote.id)}">Support</button>` : ''}
                 </div>
             `;
         }).join('')
@@ -1231,15 +1568,15 @@ function renderChairmanGovernance(corp) {
             ${hasMajoritySharesUi(corp, currentUser.id) ? `
                 <div class="governance-control">
                     <label>Majority change:</label>
-                    <select id="chairmanMajority-${corp.id}">${voteOptions}</select>
-                    <button class="btn btn-primary btn-sm" onclick="changeChairmanByMajority('${corp.id}')">Change Chairman</button>
+                    <select id="chairmanMajority-${escapeAttr(corp.id)}">${voteOptions}</select>
+                    <button class="btn btn-primary btn-sm" data-game-action="change-chairman-majority" data-corp-id="${escapeAttr(corp.id)}">Change Chairman</button>
                 </div>
             ` : ''}
             ${myShares > 0 ? `
                 <div class="governance-control">
                     <label>Propose vote:</label>
-                    <select id="chairmanVoteCandidate-${corp.id}">${voteOptions}</select>
-                    <button class="btn btn-secondary btn-sm" onclick="proposeChairmanVote('${corp.id}')">Propose</button>
+                    <select id="chairmanVoteCandidate-${escapeAttr(corp.id)}">${voteOptions}</select>
+                    <button class="btn btn-secondary btn-sm" data-game-action="propose-chairman-vote" data-corp-id="${escapeAttr(corp.id)}">Propose</button>
                 </div>
             ` : ''}
             <div class="chairman-votes">
@@ -1579,18 +1916,6 @@ function formatSharePositions(positions, transferred = false) {
     }).join(', ');
 }
 
-// Log game event
-async function logGameEvent(eventType, eventData) {
-    try {
-        await apiFetch(`/games/${currentGame.id}/events`, {
-            method: 'POST',
-            body: JSON.stringify({ event_type: eventType, event_data: eventData })
-        });
-    } catch (err) {
-        console.error('Error logging event:', err);
-    }
-}
-
 // Modal controls
 function openModal(modalId) {
     const modal = document.getElementById(modalId);
@@ -1613,7 +1938,7 @@ function closeModal(modalId) {
 }
 
 // Tab navigation
-function showSection(event, sectionName) {
+function showSection(tab, sectionName) {
     document.querySelectorAll('.section').forEach(section => {
         section.classList.remove('active');
     });
@@ -1622,7 +1947,7 @@ function showSection(event, sectionName) {
     });
 
     document.getElementById(sectionName).classList.add('active');
-    event.target.classList.add('active');
+    tab.classList.add('active');
 
     if (sectionName === 'board') {
         renderBoardTab();
@@ -1644,15 +1969,151 @@ function updateTurnBanner() {
 }
 
 function switchToGameTab() {
-    const gameTabBtn = document.querySelector('.nav-tab[onclick*="\'game\'"]');
+    const gameTabBtn = document.querySelector('.nav-tab[data-section="game"]');
     if (gameTabBtn) gameTabBtn.click();
 }
 
 // Set up UI listeners for Market section
 function setupUIListeners() {
+    bindStaticGameControls();
     // Populate player dropdowns
     populatePlayerDropdowns();
     window.addEventListener('resize', scaleBoardToFit);
+}
+
+function bindStaticGameControls() {
+    document.querySelector('.nav-tabs')?.addEventListener('click', (event) => {
+        const tab = event.target.closest('.nav-tab[data-section]');
+        if (tab) showSection(tab, tab.dataset.section);
+    });
+
+    document.addEventListener('click', (event) => {
+        const closeButton = event.target.closest('[data-close-modal]');
+        if (closeButton) {
+            closeModal(closeButton.dataset.closeModal);
+            return;
+        }
+
+        const playerSummary = event.target.closest('.player-card-summary');
+        if (playerSummary) {
+            togglePlayerCard(playerSummary);
+            return;
+        }
+
+        const propertyCard = event.target.closest('.property-card[data-property-id]');
+        if (propertyCard) {
+            selectProperty(propertyCard.dataset.propertyId);
+            return;
+        }
+
+        const actionButton = event.target.closest('[data-game-action]');
+        if (actionButton) runGameAction(actionButton);
+    });
+
+    document.addEventListener('change', (event) => {
+        if (event.target.closest('#player1Assets, #player2Assets')) {
+            updateMarketActionState();
+        }
+    });
+
+    document.getElementById('go-to-actions-btn')?.addEventListener('click', switchToGameTab);
+    document.getElementById('executeTradeBtn')?.addEventListener('click', executeTransaction);
+    document.getElementById('makePaymentBtn')?.addEventListener('click', makePayment);
+    document.getElementById('confirm-purchase-btn')?.addEventListener('click', confirmPurchase);
+    document.getElementById('start-auction-btn')?.addEventListener('click', startAuctionFromPurchase);
+    document.getElementById('create-ipo-btn')?.addEventListener('click', createIPO);
+    document.getElementById('debtAction')?.addEventListener('change', toggleDebtForm);
+    document.getElementById('debtIssuer')?.addEventListener('change', renderDebtCollateralOptions);
+    document.getElementById('debtToSettle')?.addEventListener('change', updateSettlementFullAmountState);
+    document.getElementById('payFullDebtBtn')?.addEventListener('click', fillFullSettlementAmount);
+    document.getElementById('debtsToRefinance')?.addEventListener('change', () => {
+        renderRefinanceCollateralOptions();
+        updateRefinanceSummary();
+    });
+    document.getElementById('refinanceAmount')?.addEventListener('input', updateRefinanceSummary);
+    document.getElementById('process-debt-btn')?.addEventListener('click', processDebt);
+    document.getElementById('confirm-house-purchase-btn')?.addEventListener('click', confirmHousePurchase);
+    document.getElementById('back-to-lobby-btn')?.addEventListener('click', () => {
+        window.location.href = 'lobby.html';
+    });
+    document.getElementById('dismiss-hotseat-btn')?.addEventListener('click', dismissHotseatInterstitial);
+}
+
+function runGameAction(button) {
+    switch (button.dataset.gameAction) {
+        case 'place-auction-bid':
+            placeAuctionBid();
+            break;
+        case 'pass-auction':
+            passAuction();
+            break;
+        case 'host-cancel-auction':
+            hostCancelAuction();
+            break;
+        case 'open-buy-property':
+            openBuyPropertyModal();
+            break;
+        case 'roll-dice':
+            rollDiceAndMove();
+            break;
+        case 'pay-jail-fine':
+            payJailFine();
+            break;
+        case 'use-jail-card':
+            useJailCard();
+            break;
+        case 'open-ipo':
+            openIPOModal();
+            break;
+        case 'open-debt':
+            openDebtModal();
+            break;
+        case 'open-corporation':
+            openCorporationModal();
+            break;
+        case 'end-turn':
+            endTurn();
+            break;
+        case 'host-pause':
+            hostPauseGame();
+            break;
+        case 'host-end':
+            hostEndGame();
+            break;
+        case 'host-resume':
+            hostResumeGame();
+            break;
+        case 'buy-shares':
+            buyShares(button.dataset.corpId);
+            break;
+        case 'support-chairman-vote':
+            supportChairmanVote(button.dataset.corpId, button.dataset.voteId);
+            break;
+        case 'change-chairman-majority':
+            changeChairmanByMajority(button.dataset.corpId);
+            break;
+        case 'propose-chairman-vote':
+            proposeChairmanVote(button.dataset.corpId);
+            break;
+        case 'accept-trade-offer':
+            acceptTradeOffer(button.dataset.offerId);
+            break;
+        case 'cancel-trade-offer':
+            cancelTradeOffer(button.dataset.offerId);
+            break;
+        case 'host-cancel-trade-offer':
+            hostCancelTradeOffer(button.dataset.offerId);
+            break;
+        case 'adjust-house':
+            houseModalAdjust(button.dataset.propertyId, Number(button.dataset.delta));
+            break;
+        case 'open-house':
+            openHouseModal();
+            break;
+        default:
+            console.warn('Unhandled game action:', button.dataset.gameAction);
+            break;
+    }
 }
 
 function populatePlayerDropdowns() {
@@ -1665,7 +2126,7 @@ function populatePlayerDropdowns() {
     if (!player1Select || !player2Select || !paymentFromPlayer || !paymentToPlayer) return;
 
     const playersHtml = gameState.players.map(p =>
-        `<option value="${escapeHtml(p.userId)}">${escapeHtml(p.name)}</option>`
+        `<option value="${escapeAttr(p.userId)}">${escapeHtml(p.name)}</option>`
     ).join('');
 
     const previous = {
@@ -1762,8 +2223,8 @@ function updatePlayerAssets(playerNumber) {
 
     const assetsHtml = player.properties.map(p => `
         <div class="asset-checkbox">
-            <input type="checkbox" id="${playerNumber}-asset-${p.id}" value="${p.id}" onchange="updateMarketActionState()">
-            <label for="${playerNumber}-asset-${p.id}">${escapeHtml(p.name)} ($${p.value})</label>
+            <input type="checkbox" id="${playerNumber}-asset-${escapeAttr(p.id)}" value="${escapeAttr(p.id)}">
+            <label for="${playerNumber}-asset-${escapeAttr(p.id)}">${escapeHtml(p.name)} ($${p.value})</label>
         </div>
     `).join('');
 
@@ -1840,9 +2301,9 @@ function renderTradeOffers() {
                 </div>
                 ${hasActions ? `
                     <div class="trade-offer-actions">
-                        ${canAccept ? `<button class="btn btn-success btn-sm" onclick="acceptTradeOffer('${offer.id}')">Accept</button>` : ''}
-                        ${canCancel ? `<button class="btn btn-secondary btn-sm" onclick="cancelTradeOffer('${offer.id}')">${expired ? 'Clear Expired' : (canAccept ? 'Decline' : 'Cancel')}</button>` : ''}
-                        ${canHostCancel ? `<button class="btn btn-danger btn-sm" onclick="hostCancelTradeOffer('${offer.id}')">${expired ? 'Clear Expired' : 'Host Cancel'}</button>` : ''}
+                        ${canAccept ? `<button class="btn btn-success btn-sm" data-game-action="accept-trade-offer" data-offer-id="${escapeAttr(offer.id)}">Accept</button>` : ''}
+                        ${canCancel ? `<button class="btn btn-secondary btn-sm" data-game-action="cancel-trade-offer" data-offer-id="${escapeAttr(offer.id)}">${expired ? 'Clear Expired' : (canAccept ? 'Decline' : 'Cancel')}</button>` : ''}
+                        ${canHostCancel ? `<button class="btn btn-danger btn-sm" data-game-action="host-cancel-trade-offer" data-offer-id="${escapeAttr(offer.id)}">${expired ? 'Clear Expired' : 'Host Cancel'}</button>` : ''}
                     </div>
                 ` : `<p class="empty-state">${canClearExpired ? 'Clear this expired offer from the involved player view.' : 'Waiting on the involved players'}</p>`}
             </div>
@@ -2016,11 +2477,9 @@ async function makePayment() {
 // BOARD TAB FUNCTIONS
 // ============================================================
 
-// Pending payment state (set by showRentPrompt / showTaxPrompt)
-let pendingPayment = null;
-
 // Pending house selections { propertyId: deltaCount }
 let pendingHouseSelections = {};
+let houseModalRender = null;
 
 // Show a brief toast notification
 function showToast(message) {
@@ -2062,167 +2521,24 @@ async function rollDiceAndMove() {
     }
 }
 
-// ---------------------------------------------------------------
-// Landing logic
-// ---------------------------------------------------------------
-function processLanding(player, position, gameState, diceTotal) {
-    const square = BOARD_SQUARES[position];
-    const landingEvents = [];
-
-    switch (square.type) {
-        case 'go':
-            // Nothing extra — GO money already given on pass
-            break;
-
-        case 'property':
-        case 'railroad':
-        case 'utility': {
-            const prop = gameState.properties.find(p => p.id === square.propertyId);
-            if (!prop) break;
-            if (!prop.ownerId) {
-                showToast(`${square.name} is unowned — buy it via the Game tab.`);
-            } else if (prop.ownerId === player.userId) {
-                showToast(`You own ${square.name}.`);
-            } else {
-                // Owned by another active player
-                const owner = gameState.players.find(p => p.userId === prop.ownerId);
-                if (owner && !owner.bankrupt) {
-                    const rent = calculateRent(prop, gameState, diceTotal);
-                    player.cash -= rent;
-                    owner.cash += rent;
-                    gameState.gameLog.push({
-                        timestamp: new Date().toISOString(),
-                        message: `${player.name} paid $${rent} rent to ${owner.name} for ${square.name}`
-                    });
-                    landingEvents.push({
-                        type: 'forced_payment',
-                        data: { from: player.name, to: owner.name, amount: rent, reason: `Rent for ${square.name}` }
-                    });
-                    showToast(`Paid $${rent} rent to ${owner.name}.`);
-                }
-            }
-            break;
-        }
-
-        case 'tax':
-            player.cash -= square.taxAmount;
-            gameState.gameLog.push({
-                timestamp: new Date().toISOString(),
-                message: `${player.name} paid $${square.taxAmount} to the Bank for ${square.name}`
-            });
-            landingEvents.push({
-                type: 'tax_payment',
-                data: { from: player.name, to: 'the Bank', amount: square.taxAmount, reason: square.name }
-            });
-            showToast(`Paid $${square.taxAmount} for ${square.name}.`);
-            break;
-
-        case 'chance':
-            handleCardDraw('chance', gameState, gameState.players.indexOf(player));
-            break;
-
-        case 'community_chest':
-            handleCardDraw('community_chest', gameState, gameState.players.indexOf(player));
-            break;
-
-        case 'go_to_jail':
-            player.inJail = true;
-            player.position = 10;
-            player.doubleCount = 0;
-            player.diceRolled = true;
-            gameState.gameLog.push({
-                timestamp: new Date().toISOString(),
-                message: `${player.name} landed on Go to Jail!`
-            });
-            break;
-
-        case 'jail':
-            showToast('Just visiting!');
-            break;
-
-        case 'free_parking':
-            showToast('Free Parking — enjoy the rest!');
-            break;
-
-        default:
-            break;
+async function payJailFine() {
+    if (!currentGame || !currentUser) return;
+    try {
+        await performGameAction('pay_jail_fine', {});
+    } catch (error) {
+        console.error('Error paying Jail fine:', error);
+        alert(error.message || 'Failed to pay Jail fine');
     }
-
-    return landingEvents;
 }
 
-// ---------------------------------------------------------------
-// Card drawing
-// ---------------------------------------------------------------
-function handleCardDraw(deckType, gameState, activePlayerIndex) {
-    const isChance = deckType === 'chance';
-    const deckKey = isChance ? 'chanceCards' : 'communityChestCards';
-    const sourceDeck = isChance ? CHANCE_CARDS : COMMUNITY_CHEST_CARDS;
-
-    // Ensure deck exists and is populated
-    if (!gameState[deckKey] || gameState[deckKey].length === 0) {
-        gameState[deckKey] = shuffleDeck(sourceDeck);
+async function useJailCard() {
+    if (!currentGame || !currentUser) return;
+    try {
+        await performGameAction('use_get_out_of_jail_card', {});
+    } catch (error) {
+        console.error('Error using Get Out of Jail Free card:', error);
+        alert(error.message || 'Failed to use Jail card');
     }
-
-    const card = gameState[deckKey].shift();
-
-    const { message } = applyCardEffect(card, gameState, activePlayerIndex);
-
-    gameState.lastCardDrawn = card;
-
-    // Show card modal
-    document.getElementById('cardModalHeader').textContent = isChance ? 'Chance' : 'Community Chest';
-    document.getElementById('cardModalText').textContent = card.text;
-    document.getElementById('cardModalEffect').textContent = 'Applied: ' + message;
-    openModal('cardModal');
-
-    // Log to persistent game log
-    const playerName = gameState.players[activePlayerIndex] ? gameState.players[activePlayerIndex].name : 'Unknown';
-    logGameEvent('card_draw', {
-        player: playerName,
-        deckType: isChance ? 'Chance' : 'Community Chest',
-        card: card.text,
-        effect: message
-    });
-}
-
-// ---------------------------------------------------------------
-// Rent / Tax prompts
-// ---------------------------------------------------------------
-function showRentPrompt(square, property, owner, amount) {
-    pendingPayment = { amount, toPlayerId: owner.userId, toPlayerName: owner.name };
-
-    const myPlayer = currentGame.game_state.players.find(p => p.userId === currentUser.id);
-    const cashAfter = (myPlayer ? myPlayer.cash : 0) - amount;
-
-    document.getElementById('rentModalMessage').innerHTML =
-        `You landed on <strong>${escapeHtml(square.name)}</strong> (owned by <strong>${escapeHtml(owner.name)}</strong>).`;
-    document.getElementById('rentModalAmount').textContent = `Rent: $${amount}`;
-    document.getElementById('rentModalCashAfter').textContent =
-        `Your cash: $${myPlayer ? Math.round(myPlayer.cash) : '?'} → $${Math.round(cashAfter)} after payment`;
-    document.getElementById('rentPayBtn').textContent = `Pay $${amount}`;
-    openModal('rentModal');
-}
-
-function showTaxPrompt(amount, squareName) {
-    pendingPayment = { amount, toPlayerId: null, toPlayerName: 'the Bank' };
-
-    const myPlayer = currentGame.game_state.players.find(p => p.userId === currentUser.id);
-    const cashAfter = (myPlayer ? myPlayer.cash : 0) - amount;
-
-    document.getElementById('rentModalMessage').innerHTML =
-        `You landed on <strong>${escapeHtml(squareName)}</strong>.`;
-    document.getElementById('rentModalAmount').textContent = `Tax: $${amount}`;
-    document.getElementById('rentModalCashAfter').textContent =
-        `Your cash: $${myPlayer ? Math.round(myPlayer.cash) : '?'} → $${Math.round(cashAfter)} after payment`;
-    document.getElementById('rentPayBtn').textContent = `Pay $${amount}`;
-    openModal('rentModal');
-}
-
-async function confirmRentPayment() {
-    pendingPayment = null;
-    closeModal('rentModal');
-    renderBoardTab();
 }
 
 // ---------------------------------------------------------------
@@ -2259,9 +2575,9 @@ function openHouseModal() {
                         <span style="color:#888;margin-left:6px;font-size:0.8rem;">($${costPer}/house)</span>
                     </div>
                     <div class="house-count-control">
-                        <button onclick="houseModalAdjust('${prop.id}', -1)">−</button>
+                        <button data-game-action="adjust-house" data-property-id="${escapeAttr(prop.id)}" data-delta="-1">−</button>
                         <span style="min-width:60px;text-align:center;">${houseLabel}</span>
-                        <button onclick="houseModalAdjust('${prop.id}', 1)">+</button>
+                        <button data-game-action="adjust-house" data-property-id="${escapeAttr(prop.id)}" data-delta="1">+</button>
                     </div>
                 </div>`;
         }).join('');
@@ -2271,19 +2587,22 @@ function openHouseModal() {
             `Total cost: $${totalCost}  |  Cash available: $${Math.round(cash)}`;
     }
 
-    // Expose adjust function globally so inline onclick works
-    window.houseModalAdjust = function(propertyId, delta) {
-        const prop = gameState.properties.find(p => p.id === propertyId);
-        if (!prop) return;
-        const current = pendingHouseSelections[propertyId] || 0;
-        const newHouses = (prop.houses || 0) + current + delta;
-        if (newHouses < (prop.houses || 0) || newHouses > 5) return;
-        pendingHouseSelections[propertyId] = current + delta;
-        renderHouseModal();
-    };
+    houseModalRender = renderHouseModal;
 
     renderHouseModal();
     openModal('houseModal');
+}
+
+function houseModalAdjust(propertyId, delta) {
+    const gameState = currentGame?.game_state;
+    if (!gameState) return;
+    const prop = gameState.properties.find(p => p.id === propertyId);
+    if (!prop) return;
+    const current = pendingHouseSelections[propertyId] || 0;
+    const newHouses = (prop.houses || 0) + current + delta;
+    if (newHouses < (prop.houses || 0) || newHouses > 5) return;
+    pendingHouseSelections[propertyId] = current + delta;
+    if (houseModalRender) houseModalRender();
 }
 
 async function confirmHousePurchase() {
@@ -2297,6 +2616,7 @@ async function confirmHousePurchase() {
         }
         await performGameAction('buy_houses', { selections });
         pendingHouseSelections = {};
+        houseModalRender = null;
         closeModal('houseModal');
 
     } catch (error) {

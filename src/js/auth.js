@@ -1,7 +1,5 @@
 // Authentication — OTP code verification
 
-let currentEmail = '';
-
 async function handleSendCode() {
     const email = document.getElementById('email-input').value.trim();
     const errorEl = document.getElementById('email-error');
@@ -23,7 +21,6 @@ async function handleSendCode() {
             body: JSON.stringify({ email })
         });
 
-        currentEmail = email;
         document.getElementById('sent-to-email').textContent = email;
         document.getElementById('step-email').style.display = 'none';
         document.getElementById('step-code').style.display = 'block';
@@ -41,6 +38,7 @@ async function handleSendCode() {
 async function handleVerifyCode() {
     const token = document.getElementById('code-input').value.trim();
     const errorEl = document.getElementById('code-error');
+    const email = document.getElementById('sent-to-email').textContent;
 
     if (!token) {
         errorEl.textContent = 'Please enter the 6-digit code';
@@ -56,7 +54,7 @@ async function handleVerifyCode() {
     try {
         const data = await apiFetch('/auth/verify-otp', {
             method: 'POST',
-            body: JSON.stringify({ email: currentEmail, token })
+            body: JSON.stringify({ email, token })
         });
 
         localStorage.setItem('auth_token', data.token);
@@ -72,7 +70,6 @@ async function handleVerifyCode() {
 }
 
 function resetToEmail() {
-    currentEmail = '';
     document.getElementById('step-code').style.display = 'none';
     document.getElementById('step-email').style.display = 'block';
     document.getElementById('code-input').value = '';
@@ -98,6 +95,13 @@ async function checkAuth() {
 
 // Handle Enter key on both inputs
 document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('send-code-btn').addEventListener('click', handleSendCode);
+    document.getElementById('verify-code-btn').addEventListener('click', handleVerifyCode);
+    document.getElementById('reset-email-link').addEventListener('click', (e) => {
+        e.preventDefault();
+        resetToEmail();
+    });
+
     document.getElementById('email-input').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') handleSendCode();
     });

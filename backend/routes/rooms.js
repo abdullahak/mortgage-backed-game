@@ -5,6 +5,7 @@ const { requireAuth, makeToken } = require('./auth');
 const { sendEmail } = require('../mailer');
 const { getConfig } = require('../config');
 const { createRateLimiter, getRequestActorKey } = require('../rateLimit');
+const { normalizeEmail, isValidEmail, normalizeInviteCode } = require('../normalizers');
 
 module.exports = (io) => {
 const router = express.Router();
@@ -16,12 +17,18 @@ const roomCreateRateLimit = createRateLimiter({
     keyGenerator: getRequestActorKey,
 });
 
-// Helper: get room with members
 function getRoomWithMembers(roomId) {
     const room = db.prepare(`SELECT * FROM rooms WHERE id = ?`).get(roomId);
     if (!room) return null;
-    const members = db.prepare(`SELECT * FROM room_members WHERE room_id = ? ORDER BY joined_at ASC`).all(roomId);
+    return attachRoomMembers(room);
+}
+
+function attachRoomMembers(room, members = getRoomMembers(room.id)) {
     return { ...room, room_members: members };
+}
+
+function getRoomMembers(roomId) {
+    return db.prepare(`SELECT * FROM room_members WHERE room_id = ? ORDER BY joined_at ASC`).all(roomId);
 }
 
 function isRoomMember(roomId, userId) {
@@ -29,7 +36,63 @@ function isRoomMember(roomId, userId) {
 }
 
 function getRoomByInviteCode(code) {
-    return db.prepare(`SELECT * FROM rooms WHERE invite_code = ?`).get(String(code || '').toUpperCase());
+    return db.prepare(`SELECT * FROM rooms WHERE invite_code = ?`).get(normalizeInviteCode(code));
+}
+
+function isClosedToNewMembers(room, members) {
+    return room.status !== 'waiting' || members.length >= room.max_players;
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+async function sendInviteCodeEmail({ email, inviteCode, roomName }) {
+    if (!email || !inviteCode) return;
+
+    await sendEmail(
+        email,
+        `Your room code for ${roomName || 'Mortgage Backed Monopoly'}`,
+        `Your invite code is: ${inviteCode}\n\nShare it with friends to join your game.`,
+        `<p>Your invite code is: <strong>${inviteCode}</strong></p><p>Share it with friends to join your game.</p>`
+    );
+}
+
+async function sendForgotRoomCodes(email) {
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+        return { status: 400, body: { error: 'Valid email required' } };
+    }
+
+    const rooms = db.prepare(`
+        SELECT DISTINCT rooms.name, rooms.invite_code, rooms.status
+        FROM rooms
+        JOIN room_members ON room_members.room_id = rooms.id
+        JOIN users ON users.id = room_members.user_id
+        WHERE lower(users.email) = ?
+        ORDER BY rooms.created_at DESC
+    `).all(normalizedEmail);
+
+    if (rooms.length > 0) {
+        const listText = rooms.map(room => `${room.name}: ${room.invite_code} (${room.status})`).join('\n');
+        const listHtml = rooms
+            .map(room => `<li><strong>${escapeHtml(room.invite_code)}</strong> - ${escapeHtml(room.name)} (${escapeHtml(room.status)})</li>`)
+            .join('');
+
+        await sendEmail(
+            normalizedEmail,
+            'Your Mortgage Backed room codes',
+            `Here are your room codes:\n\n${listText}`,
+            `<p>Here are your room codes:</p><ul>${listHtml}</ul>`
+        );
+    }
+
+    return { status: 200, body: { ok: true } };
 }
 
 // POST /api/rooms — create room
@@ -64,8 +127,7 @@ router.post('/', requireAuth, roomCreateRateLimit, (req, res) => {
 router.get('/by-code/:code', (req, res) => {
     const room = getRoomByInviteCode(req.params.code);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    const members = db.prepare(`SELECT * FROM room_members WHERE room_id = ? ORDER BY joined_at ASC`).all(room.id);
-    res.json({ ...room, room_members: members });
+    res.json(attachRoomMembers(room));
 });
 
 // POST /api/rooms/by-code/:code/claim-member — resume as an existing room member.
@@ -77,9 +139,8 @@ router.post('/by-code/:code/claim-member', (req, res) => {
     if (!room) return res.status(404).json({ error: 'Room not found' });
     if (!member_id) return res.status(400).json({ error: 'member_id required' });
 
-    const members = db.prepare(`SELECT * FROM room_members WHERE room_id = ? ORDER BY joined_at ASC`).all(room.id);
-    const roomIsClosedToNewMembers = room.status !== 'waiting' || members.length >= room.max_players;
-    if (!roomIsClosedToNewMembers) {
+    const members = getRoomMembers(room.id);
+    if (!isClosedToNewMembers(room, members)) {
         return res.status(400).json({ error: 'Room is still open for new players' });
     }
 
@@ -93,7 +154,7 @@ router.post('/by-code/:code/claim-member', (req, res) => {
         token: makeToken(user.id),
         user,
         member,
-        room: { ...room, room_members: members }
+        room: attachRoomMembers(room, members)
     });
 });
 
@@ -103,9 +164,8 @@ router.post('/by-code/:code/claim-hotseat', (req, res) => {
     const room = getRoomByInviteCode(req.params.code);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
-    const members = db.prepare(`SELECT * FROM room_members WHERE room_id = ? ORDER BY joined_at ASC`).all(room.id);
-    const roomIsClosedToNewMembers = room.status !== 'waiting' || members.length >= room.max_players;
-    if (!roomIsClosedToNewMembers) {
+    const members = getRoomMembers(room.id);
+    if (!isClosedToNewMembers(room, members)) {
         return res.status(400).json({ error: 'Room is still open for new players' });
     }
 
@@ -116,7 +176,7 @@ router.post('/by-code/:code/claim-hotseat', (req, res) => {
     }));
 
     res.json({
-        room: { ...room, room_members: members },
+        room: attachRoomMembers(room, members),
         tokens
     });
 });
@@ -193,22 +253,26 @@ router.patch('/:id/status', requireAuth, (req, res) => {
     res.json({ ok: true });
 });
 
-// POST /api/rooms/send-code — send invite code to host's email
-router.post('/send-code', requireAuth, async (req, res) => {
-    const { email, inviteCode, roomName } = req.body;
-    if (email && inviteCode) {
+router.post('/send-code', async (req, res) => {
+    if (req.body?.action === 'forgot_code') {
         try {
-            await sendEmail(
-                email,
-                `Your room code for ${roomName || 'Mortgage Backed Monopoly'}`,
-                `Your invite code is: ${inviteCode}\n\nShare it with friends to join your game.`,
-                `<p>Your invite code is: <strong>${inviteCode}</strong></p><p>Share it with friends to join your game.</p>`
-            );
+            const result = await sendForgotRoomCodes(req.body.email);
+            return res.status(result.status).json(result.body);
+        } catch (err) {
+            console.error('Forgot room code email error:', err);
+            return res.json({ ok: true });
+        }
+    }
+
+    requireAuth(req, res, async () => {
+        const { email, inviteCode, roomName } = req.body;
+        try {
+            await sendInviteCodeEmail({ email, inviteCode, roomName });
         } catch (err) {
             console.error('Invite email error:', err);
         }
-    }
-    res.json({ ok: true });
+        res.json({ ok: true });
+    });
 });
 
 function generateInviteCode() {

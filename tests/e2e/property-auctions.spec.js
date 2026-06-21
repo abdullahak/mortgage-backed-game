@@ -1,18 +1,15 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
-const { loginPage } = require('./helpers');
-
-const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
-const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
+const { BASE, BASE_API, apiJson, loginPage, playerState } = require('./helpers');
 
 async function setupAuctionGame(request) {
-    const host = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
-    const guest = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
-    const room = await (await request.post(`${BASE_API}/rooms`, {
+    const host = await apiJson(request, 'post', `${BASE_API}/auth/anonymous`);
+    const guest = await apiJson(request, 'post', `${BASE_API}/auth/anonymous`);
+    const room = await apiJson(request, 'post', `${BASE_API}/rooms`, {
         headers: { Authorization: `Bearer ${host.token}` },
         data: { name: `Auction Room ${Date.now()}`, player_name: 'Alice', max_players: 4 },
-    })).json();
-    await request.post(`${BASE_API}/rooms/${room.id}/join`, {
+    });
+    await apiJson(request, 'post', `${BASE_API}/rooms/${room.id}/join`, {
         headers: { Authorization: `Bearer ${guest.token}` },
         data: { player_name: 'Bob' },
     });
@@ -34,10 +31,10 @@ async function setupAuctionGame(request) {
         lastCardDrawn: null,
         settings: { passGoAmount: 200, startingCash: 1500, interestRate: 5 },
     };
-    const game = await (await request.post(`${BASE_API}/games`, {
+    const game = await apiJson(request, 'post', `${BASE_API}/games`, {
         headers: { Authorization: `Bearer ${host.token}` },
         data: { room_id: room.id, game_state: gameState },
-    })).json();
+    });
 
     return { room, game, host, guest };
 }
@@ -49,25 +46,6 @@ async function postGameAction(request, gameId, token, data) {
     });
     const body = await res.json();
     return { res, body };
-}
-
-function playerState(userId, name, overrides = {}) {
-    return {
-        userId,
-        name,
-        cash: 1500,
-        position: 0,
-        bankrupt: false,
-        inJail: false,
-        jailTurns: 0,
-        doubleCount: 0,
-        diceRolled: false,
-        hasGetOutOfJailCard: false,
-        properties: [],
-        corporations: [],
-        debts: [],
-        ...overrides,
-    };
 }
 
 test.describe('Property auctions', () => {
@@ -98,9 +76,9 @@ test.describe('Property auctions', () => {
         await alicePage.getByRole('button', { name: /^Pass$/ }).click();
         await expect(alicePage.locator('#auctionPanel')).toHaveCount(0, { timeout: 5000 });
 
-        const fetched = await (await request.get(`${BASE_API}/games/${setup.game.id}`, {
+        const fetched = await apiJson(request, 'get', `${BASE_API}/games/${setup.game.id}`, {
             headers: { Authorization: `Bearer ${setup.host.token}` },
-        })).json();
+        });
         expect(fetched.game_state.auction.status).toBe('sold');
         expect(fetched.game_state.auction.winnerName).toBe('Bob');
         expect(fetched.game_state.properties.find(prop => prop.id === 'prop-0').ownerId).toBe(setup.guest.user.id);
@@ -123,9 +101,9 @@ test.describe('Property auctions', () => {
         await expect(page.locator('#auctionPanel')).toHaveCount(0, { timeout: 5000 });
         await expect(page.locator('.action-btn-end-turn')).toHaveText('End Turn');
 
-        const fetched = await (await request.get(`${BASE_API}/games/${setup.game.id}`, {
+        const fetched = await apiJson(request, 'get', `${BASE_API}/games/${setup.game.id}`, {
             headers: { Authorization: `Bearer ${setup.host.token}` },
-        })).json();
+        });
         expect(fetched.game_state.auction.status).toBe('canceled');
         expect(fetched.game_state.auction.cancelReason).toBe('host');
         expect(fetched.game_state.properties.find(prop => prop.id === 'prop-0').ownerId).toBeNull();
@@ -159,9 +137,9 @@ test.describe('Property auctions', () => {
         expect(staleBid.res.status()).toBe(409);
         expect(staleBid.body.error).toBe('Stale game state');
 
-        const fetched = await (await request.get(`${BASE_API}/games/${setup.game.id}`, {
+        const fetched = await apiJson(request, 'get', `${BASE_API}/games/${setup.game.id}`, {
             headers: { Authorization: `Bearer ${setup.host.token}` },
-        })).json();
+        });
         expect(fetched.game_state.auction.status).toBe('open');
         expect(fetched.game_state.auction.currentBid).toBe(70);
         expect(fetched.game_state.auction.highBidderId).toBe(setup.guest.user.id);

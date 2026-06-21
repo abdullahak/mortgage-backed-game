@@ -86,7 +86,11 @@ The difference is deducted from your cash. Default rate: **5% per turn**.
 
 ### Settle Debt
 
-Tap **Manage Debt → Settle Existing Debt**. Select the debt and enter a payment amount. Cash is deducted and the principal reduced. Debt is removed when fully paid.
+Tap **Manage Debt → Settle Existing Debt**. Select the debt and enter a payment amount, or use **Full Amount** to fill the remaining principal. Cash is deducted and the principal reduced. Debt is removed when fully paid.
+
+### Refinance Debt
+
+Tap **Manage Debt → Refinance Existing Debt**. Select one or more existing debts, set a larger new loan amount, and choose collateral. The selected debts are paid off, one new loan is created at the room's debt rate, and you receive only the net new cash above the payoff amount.
 
 ---
 

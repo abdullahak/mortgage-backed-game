@@ -4,9 +4,11 @@ process.env.DB_PATH = ':memory:';
 process.env.JWT_SECRET = 'test-secret';
 
 const request = require('supertest');
+const { addRoomMemberFixture, createRoomFixture, createUserFixture, resetTestDb } = require('../helpers/fixtures');
 
 let app, db;
 let user1, user2;
+const originalUseSendApiKey = process.env.USESEND_API_KEY;
 
 beforeAll(() => {
     const { app: a } = require('../../server');
@@ -16,11 +18,19 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-    // Clear tables (preserve schema)
-    db.exec(`DELETE FROM game_events; DELETE FROM games; DELETE FROM room_members; DELETE FROM rooms; DELETE FROM otps; DELETE FROM users;`);
-    const { createUserFixture } = require('../helpers/fixtures');
+    delete process.env.USESEND_API_KEY;
+
+    resetTestDb(db);
     user1 = createUserFixture(db);
     user2 = createUserFixture(db);
+});
+
+afterAll(() => {
+    if (originalUseSendApiKey) {
+        process.env.USESEND_API_KEY = originalUseSendApiKey;
+    } else {
+        delete process.env.USESEND_API_KEY;
+    }
 });
 
 // ---------------------------------------------------------------------------
@@ -127,7 +137,6 @@ describe('POST /api/rooms', () => {
 // ---------------------------------------------------------------------------
 describe('GET /api/rooms/by-code/:code', () => {
     test('200 returns room with members', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'TESTCD' });
 
         const res = await request(app).get('/api/rooms/by-code/TESTCD');
@@ -141,17 +150,14 @@ describe('GET /api/rooms/by-code/:code', () => {
         expect(res.status).toBe(404);
     });
 
-    test('invite code lookup is case-insensitive (uppercased internally)', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
+    test('invite code lookup is case-insensitive', async () => {
         createRoomFixture(db, user1.id, { inviteCode: 'ABCDEF' });
 
         const res = await request(app).get('/api/rooms/by-code/abcdef');
-        // The route calls .toUpperCase() on the param
         expect(res.status).toBe(200);
     });
 
     test('returns room_members array', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'MMBR12' });
 
         const res = await request(app).get(`/api/rooms/by-code/MMBR12`);
@@ -165,16 +171,12 @@ describe('GET /api/rooms/by-code/:code', () => {
 // ---------------------------------------------------------------------------
 describe('POST /api/rooms/by-code/:code/claim-member', () => {
     test('200 returns a token for an existing member when room is full', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'CLAIM1', maxPlayers: 2 });
-        db.prepare(`
-            INSERT INTO room_members (id, room_id, user_id, player_name)
-            VALUES (?, ?, ?, ?)
-        `).run('member-bob', room.id, user2.id, 'Bob');
+        const member = addRoomMemberFixture(db, room.id, user2.id, 'Bob');
 
         const res = await request(app)
             .post('/api/rooms/by-code/CLAIM1/claim-member')
-            .send({ member_id: 'member-bob' });
+            .send({ member_id: member.id });
 
         expect(res.status).toBe(200);
         expect(res.body.user.id).toBe(user2.id);
@@ -189,7 +191,6 @@ describe('POST /api/rooms/by-code/:code/claim-member', () => {
     });
 
     test('200 returns a token for an existing member when room is in progress', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'CLAIM2', status: 'in_progress', maxPlayers: 4 });
 
         const res = await request(app)
@@ -202,7 +203,6 @@ describe('POST /api/rooms/by-code/:code/claim-member', () => {
     });
 
     test('400 rejects member claims while room is still open for new players', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'OPEN01', maxPlayers: 4 });
 
         const res = await request(app)
@@ -214,7 +214,6 @@ describe('POST /api/rooms/by-code/:code/claim-member', () => {
     });
 
     test('404 rejects member id from another room', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         createRoomFixture(db, user1.id, { inviteCode: 'CLAIM3', maxPlayers: 1 });
 
         const res = await request(app)
@@ -230,12 +229,8 @@ describe('POST /api/rooms/by-code/:code/claim-member', () => {
 // ---------------------------------------------------------------------------
 describe('POST /api/rooms/by-code/:code/claim-hotseat', () => {
     test('200 returns tokens for all existing members when room is full', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'HSEAT1', maxPlayers: 2 });
-        db.prepare(`
-            INSERT INTO room_members (id, room_id, user_id, player_name)
-            VALUES (?, ?, ?, ?)
-        `).run('member-bob-hotseat', room.id, user2.id, 'Bob');
+        addRoomMemberFixture(db, room.id, user2.id, 'Bob');
 
         const res = await request(app)
             .post('/api/rooms/by-code/HSEAT1/claim-hotseat')
@@ -255,7 +250,6 @@ describe('POST /api/rooms/by-code/:code/claim-hotseat', () => {
     });
 
     test('200 returns tokens for all existing members when room is in progress', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'HSEAT2', status: 'in_progress', maxPlayers: 4 });
 
         const res = await request(app)
@@ -268,7 +262,6 @@ describe('POST /api/rooms/by-code/:code/claim-hotseat', () => {
     });
 
     test('400 rejects hotseat claims while room is still open for new players', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         createRoomFixture(db, user1.id, { inviteCode: 'HOPEN1', maxPlayers: 4 });
 
         const res = await request(app)
@@ -285,7 +278,6 @@ describe('POST /api/rooms/by-code/:code/claim-hotseat', () => {
 // ---------------------------------------------------------------------------
 describe('GET /api/rooms/mine', () => {
     test('200 returns rooms for authenticated user', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         createRoomFixture(db, user1.id, { inviteCode: 'MINE01' });
 
         const res = await request(app)
@@ -312,7 +304,6 @@ describe('GET /api/rooms/mine', () => {
     });
 
     test('only returns rooms user is a member of', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         createRoomFixture(db, user1.id, { inviteCode: 'MINE02' });
         createRoomFixture(db, user2.id, { inviteCode: 'MINE03' }); // user2's room
 
@@ -325,7 +316,6 @@ describe('GET /api/rooms/mine', () => {
     });
 
     test('returns multiple rooms if member of several', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         createRoomFixture(db, user1.id, { inviteCode: 'MINE04' });
         createRoomFixture(db, user1.id, { inviteCode: 'MINE05' });
 
@@ -338,11 +328,53 @@ describe('GET /api/rooms/mine', () => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/rooms/send-code
+// ---------------------------------------------------------------------------
+describe('POST /api/rooms/send-code', () => {
+    test('forgot_code can be requested without auth', async () => {
+        createRoomFixture(db, user1.id, { inviteCode: 'FORGOT' });
+
+        const res = await request(app)
+            .post('/api/rooms/send-code')
+            .send({ action: 'forgot_code', email: user1.email });
+
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ ok: true });
+    });
+
+    test('forgot_code requires a valid email', async () => {
+        const res = await request(app)
+            .post('/api/rooms/send-code')
+            .send({ action: 'forgot_code', email: '' });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/Valid email/);
+    });
+
+    test('invite email requires auth', async () => {
+        const res = await request(app)
+            .post('/api/rooms/send-code')
+            .send({ email: 'friend@test.com', inviteCode: 'INVITE' });
+
+        expect(res.status).toBe(401);
+    });
+
+    test('authenticated invite email is best effort', async () => {
+        const res = await request(app)
+            .post('/api/rooms/send-code')
+            .set('Authorization', `Bearer ${user1.token}`)
+            .send({ email: 'friend@test.com', inviteCode: 'INVITE' });
+
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ ok: true });
+    });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/rooms/:id
 // ---------------------------------------------------------------------------
 describe('GET /api/rooms/:id', () => {
     test('200 returns room with members', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'GETID1' });
 
         const res = await request(app)
@@ -360,7 +392,6 @@ describe('GET /api/rooms/:id', () => {
     });
 
     test('auth required', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'NOAUTH' });
 
         const res = await request(app).get(`/api/rooms/${room.id}`);
@@ -368,7 +399,6 @@ describe('GET /api/rooms/:id', () => {
     });
 
     test('returns room_members sorted by joined_at', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'SORT01' });
 
         const res = await request(app)
@@ -383,7 +413,6 @@ describe('GET /api/rooms/:id', () => {
 // ---------------------------------------------------------------------------
 describe('POST /api/rooms/:id/join', () => {
     test('200 adds member, returns updated room', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'JOIN01', maxPlayers: 4 });
 
         const res = await request(app)
@@ -396,7 +425,6 @@ describe('POST /api/rooms/:id/join', () => {
     });
 
     test('200 (no-op) if already a member', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'JOIN02' });
 
         // user1 is already the host/member
@@ -417,7 +445,6 @@ describe('POST /api/rooms/:id/join', () => {
     });
 
     test('400 if room is full', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'FULL01', maxPlayers: 1 });
 
         const res = await request(app)
@@ -429,7 +456,6 @@ describe('POST /api/rooms/:id/join', () => {
     });
 
     test('400 if room status is not waiting', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'INPRO1', status: 'in_progress' });
 
         const res = await request(app)
@@ -441,7 +467,6 @@ describe('POST /api/rooms/:id/join', () => {
     });
 
     test('401 without auth', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'NOAU01' });
 
         const res = await request(app)
@@ -452,7 +477,6 @@ describe('POST /api/rooms/:id/join', () => {
     });
 
     test('member appears in room_members after join', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'JOIN03', maxPlayers: 4 });
 
         await request(app)
@@ -466,7 +490,6 @@ describe('POST /api/rooms/:id/join', () => {
     });
 
     test('guest name defaults to Guest if not provided', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'JOIN04', maxPlayers: 4 });
 
         await request(app)
@@ -484,7 +507,6 @@ describe('POST /api/rooms/:id/join', () => {
 // ---------------------------------------------------------------------------
 describe('DELETE /api/rooms/:id/leave', () => {
     test('200 removes member', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'LEAV01', maxPlayers: 4 });
 
         // Add user2 first
@@ -503,7 +525,6 @@ describe('DELETE /api/rooms/:id/leave', () => {
     });
 
     test('401 without auth', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'LEAV02' });
 
         const res = await request(app).delete(`/api/rooms/${room.id}/leave`);
@@ -511,7 +532,6 @@ describe('DELETE /api/rooms/:id/leave', () => {
     });
 
     test('200 no-op if user not in room', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'LEAV03' });
 
         const res = await request(app)
@@ -522,7 +542,6 @@ describe('DELETE /api/rooms/:id/leave', () => {
     });
 
     test('member no longer in room_members after leave', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'LEAV04', maxPlayers: 4 });
 
         await request(app)
@@ -539,7 +558,6 @@ describe('DELETE /api/rooms/:id/leave', () => {
     });
 
     test('response includes ok: true', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'LEAV05' });
 
         const res = await request(app)
@@ -555,7 +573,6 @@ describe('DELETE /api/rooms/:id/leave', () => {
 // ---------------------------------------------------------------------------
 describe('PATCH /api/rooms/:id/status', () => {
     test('200 host can set status to in_progress', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'STAT01' });
 
         const res = await request(app)
@@ -569,7 +586,6 @@ describe('PATCH /api/rooms/:id/status', () => {
     });
 
     test('200 host can set status to completed', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'STAT02' });
 
         const res = await request(app)
@@ -581,7 +597,6 @@ describe('PATCH /api/rooms/:id/status', () => {
     });
 
     test('200 host can set status back to waiting', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'STAT03', status: 'in_progress' });
 
         const res = await request(app)
@@ -593,7 +608,6 @@ describe('PATCH /api/rooms/:id/status', () => {
     });
 
     test('403 non-host member cannot change status', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'STAT04', maxPlayers: 4 });
 
         // Add user2 as member
@@ -611,7 +625,6 @@ describe('PATCH /api/rooms/:id/status', () => {
     });
 
     test('401 without auth', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'STAT05' });
 
         const res = await request(app)
@@ -631,7 +644,6 @@ describe('PATCH /api/rooms/:id/status', () => {
     });
 
     test('400 rejects invalid room status', async () => {
-        const { createRoomFixture } = require('../helpers/fixtures');
         const room = createRoomFixture(db, user1.id, { inviteCode: 'STAT06' });
 
         const res = await request(app)

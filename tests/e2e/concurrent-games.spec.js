@@ -1,22 +1,6 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
-const { loginPage } = require('./helpers');
-
-const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
-const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
-
-async function apiJson(request, method, url, options = {}) {
-    const res = await request[method](url, options);
-    const text = await res.text();
-    let body = null;
-    try {
-        body = text ? JSON.parse(text) : null;
-    } catch {
-        body = text;
-    }
-    expect(res.ok(), `${method.toUpperCase()} ${url} failed ${res.status()}: ${text}`).toBeTruthy();
-    return body;
-}
+const { BASE, BASE_API, apiJson, loginPage, playerState } = require('./helpers');
 
 async function setupTwoPlayerGame(request, label, playerNames) {
     const host = await apiJson(request, 'post', `${BASE_API}/auth/anonymous`);
@@ -58,24 +42,6 @@ async function setupTwoPlayerGame(request, label, playerNames) {
     });
 
     return { room, game, host, guest, hostName: playerNames[0], guestName: playerNames[1] };
-}
-
-function playerState(userId, name) {
-    return {
-        userId,
-        name,
-        cash: 1500,
-        position: 0,
-        bankrupt: false,
-        inJail: false,
-        jailTurns: 0,
-        doubleCount: 0,
-        diceRolled: false,
-        hasGetOutOfJailCard: false,
-        properties: [],
-        corporations: [],
-        debts: [],
-    };
 }
 
 async function fetchGame(request, gameId, token) {

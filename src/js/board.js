@@ -1,5 +1,5 @@
 // Board data and rendering for Mortgage Backed Monopoly
-// Must be loaded before waiting.js and game.js
+// Must be loaded before game.js
 
 // CSS colours keyed by the colour name used in MONOPOLY_PROPERTIES
 const PROP_COLORS = {
@@ -74,63 +74,6 @@ const HOUSE_COSTS = {
 
 const DIE_FACES = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 
-// ---------------------------------------------------------------------------
-// Chance Cards (16)
-// ---------------------------------------------------------------------------
-const CHANCE_CARDS = [
-    { id: 'ch-1',  text: 'Advance to GO. Collect $200.',                                          action: { type: 'advance_to', position: 0 } },
-    { id: 'ch-2',  text: 'Advance to Illinois Ave.',                                              action: { type: 'advance_to', position: 24 } },
-    { id: 'ch-3',  text: 'Advance to St. Charles Place.',                                         action: { type: 'advance_to', position: 11 } },
-    { id: 'ch-4',  text: 'Advance to nearest Utility. If owned, pay 10× your dice roll.',         action: { type: 'advance_nearest', nearestType: 'utility', utilityMultiplier: 10 } },
-    { id: 'ch-5',  text: 'Advance to nearest Railroad. Pay owner twice the normal rent.',          action: { type: 'advance_nearest', nearestType: 'railroad', rentMultiplier: 2 } },
-    { id: 'ch-6',  text: 'Bank pays you a dividend of $50.',                                      action: { type: 'collect', amount: 50 } },
-    { id: 'ch-7',  text: 'Get Out of Jail Free.',                                                 action: { type: 'get_out_of_jail' } },
-    { id: 'ch-8',  text: 'Go Back 3 Spaces.',                                                     action: { type: 'back_3' } },
-    { id: 'ch-9',  text: 'Go to Jail. Do not pass GO.',                                           action: { type: 'go_to_jail' } },
-    { id: 'ch-10', text: 'Make general repairs — $25 per house, $100 per hotel.',                  action: { type: 'repairs', perHouse: 25, perHotel: 100 } },
-    { id: 'ch-11', text: 'Pay a poor tax of $15.',                                                action: { type: 'pay', amount: 15 } },
-    { id: 'ch-12', text: 'Take a trip to Reading Railroad (Pennsylvania RR).',                    action: { type: 'advance_to', position: 5 } },
-    { id: 'ch-13', text: 'Take a walk on the Boardwalk.',                                         action: { type: 'advance_to', position: 39 } },
-    { id: 'ch-14', text: 'You have been elected Chairman of the Board — pay each player $50.',    action: { type: 'pay_to_each', amount: 50 } },
-    { id: 'ch-15', text: 'Your building and loan matures — collect $150.',                        action: { type: 'collect', amount: 150 } },
-    { id: 'ch-16', text: 'You have won a crossword competition — collect $100.',                  action: { type: 'collect', amount: 100 } },
-];
-
-// ---------------------------------------------------------------------------
-// Community Chest Cards (16)
-// ---------------------------------------------------------------------------
-const COMMUNITY_CHEST_CARDS = [
-    { id: 'cc-1',  text: 'Advance to GO. Collect $200.',                                                  action: { type: 'advance_to', position: 0 } },
-    { id: 'cc-2',  text: 'Bank error in your favor — collect $200.',                                      action: { type: 'collect', amount: 200 } },
-    { id: 'cc-3',  text: "Doctor's fee — pay $50.",                                                       action: { type: 'pay', amount: 50 } },
-    { id: 'cc-4',  text: 'From sale of stock — collect $50.',                                             action: { type: 'collect', amount: 50 } },
-    { id: 'cc-5',  text: 'Get Out of Jail Free.',                                                         action: { type: 'get_out_of_jail' } },
-    { id: 'cc-6',  text: 'Go to Jail. Do not pass GO.',                                                   action: { type: 'go_to_jail' } },
-    { id: 'cc-7',  text: 'Grand Opera Night — collect $50 from every other player.',                      action: { type: 'collect_from_each', amount: 50 } },
-    { id: 'cc-8',  text: 'Holiday fund matures — collect $100.',                                          action: { type: 'collect', amount: 100 } },
-    { id: 'cc-9',  text: 'Income tax refund — collect $20.',                                              action: { type: 'collect', amount: 20 } },
-    { id: 'cc-10', text: 'It is your birthday — collect $10 from every other player.',                    action: { type: 'collect_from_each', amount: 10 } },
-    { id: 'cc-11', text: 'Life insurance matures — collect $100.',                                        action: { type: 'collect', amount: 100 } },
-    { id: 'cc-12', text: 'Pay hospital fees of $100.',                                                    action: { type: 'pay', amount: 100 } },
-    { id: 'cc-13', text: 'Pay school fees of $150.',                                                      action: { type: 'pay', amount: 150 } },
-    { id: 'cc-14', text: 'Receive $25 consultancy fee.',                                                  action: { type: 'collect', amount: 25 } },
-    { id: 'cc-15', text: 'You are assessed for street repairs — $40 per house, $115 per hotel.',          action: { type: 'repairs', perHouse: 40, perHotel: 115 } },
-    { id: 'cc-16', text: 'You have won second prize in a beauty contest — collect $10.',                  action: { type: 'collect', amount: 10 } },
-];
-
-// ---------------------------------------------------------------------------
-// Utility functions
-// ---------------------------------------------------------------------------
-
-function shuffleDeck(arr) {
-    const deck = arr.slice();
-    for (let i = deck.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [deck[i], deck[j]] = [deck[j], deck[i]];
-    }
-    return deck;
-}
-
 function getGridCoords(position) {
     if (position <= 10) {
         return { row: 11, col: position + 1 };         // Bottom row
@@ -150,156 +93,6 @@ function getEdgeClass(position) {
     return 'right-col';
 }
 
-// Find nearest square of given type (railroad or utility) clockwise from currentPos
-function findNearestType(currentPos, type) {
-    for (let i = 1; i <= 40; i++) {
-        const candidate = (currentPos + i) % 40;
-        if (BOARD_SQUARES[candidate].type === type) return candidate;
-    }
-    return currentPos;
-}
-
-// ---------------------------------------------------------------------------
-// Rent calculation
-// ---------------------------------------------------------------------------
-function calculateRent(property, gameState, diceTotal) {
-    if (property.color === 'Railroad') {
-        const owned = gameState.properties.filter(
-            p => p.color === 'Railroad' && p.ownerId === property.ownerId
-        ).length;
-        return property.rent[owned - 1];
-    }
-
-    if (property.color === 'Utility') {
-        const owned = gameState.properties.filter(
-            p => p.color === 'Utility' && p.ownerId === property.ownerId
-        ).length;
-        return diceTotal * (owned === 2 ? 10 : 4);
-    }
-
-    // Regular property
-    if (property.houses > 0) {
-        return property.rent[property.houses]; // rent[1..5], index 5 = hotel
-    }
-
-    const colorGroup = gameState.properties.filter(p => p.color === property.color);
-    const monopoly = colorGroup.length > 0 && colorGroup.every(p => p.ownerId === property.ownerId);
-    return monopoly ? property.rent[0] * 2 : property.rent[0];
-}
-
-// ---------------------------------------------------------------------------
-// Card effect application
-// ---------------------------------------------------------------------------
-function applyCardEffect(card, gameState, activePlayerIndex) {
-    const player = gameState.players[activePlayerIndex];
-    const action = card.action;
-    let message = '';
-
-    switch (action.type) {
-        case 'advance_to': {
-            const oldPos = player.position;
-            const target = action.position;
-            const passGo = (target < oldPos) || (target === 0 && oldPos !== 0);
-            player.position = target;
-            if (passGo) {
-                player.cash += (gameState.settings.passGoAmount || 200);
-                message = `Moved to ${BOARD_SQUARES[target].name} — collected $${gameState.settings.passGoAmount || 200} passing GO`;
-            } else {
-                message = `Moved to ${BOARD_SQUARES[target].name}`;
-            }
-            break;
-        }
-
-        case 'advance_nearest': {
-            const oldPos = player.position;
-            const nearest = findNearestType(oldPos, action.nearestType);
-            const passGo = nearest < oldPos;
-            player.position = nearest;
-            if (passGo) player.cash += (gameState.settings.passGoAmount || 200);
-            message = `Moved to nearest ${action.nearestType}: ${BOARD_SQUARES[nearest].name}${passGo ? ' — collected $200 passing GO' : ''}`;
-            break;
-        }
-
-        case 'go_to_jail':
-            player.position = 10;
-            player.inJail = true;
-            player.jailTurns = 0;
-            player.doubleCount = 0;
-            message = 'Go to Jail!';
-            break;
-
-        case 'back_3': {
-            player.position = (player.position - 3 + 40) % 40;
-            message = `Moved back 3 spaces to ${BOARD_SQUARES[player.position].name}`;
-            break;
-        }
-
-        case 'collect':
-            player.cash += action.amount;
-            message = `Collected $${action.amount}`;
-            break;
-
-        case 'pay':
-            player.cash -= action.amount;
-            message = `Paid $${action.amount}`;
-            break;
-
-        case 'collect_from_each': {
-            let collected = 0;
-            gameState.players.forEach((p, i) => {
-                if (i !== activePlayerIndex && !p.bankrupt) {
-                    p.cash -= action.amount;
-                    collected += action.amount;
-                }
-            });
-            player.cash += collected;
-            message = `Collected $${action.amount} from each player ($${collected} total)`;
-            break;
-        }
-
-        case 'pay_to_each': {
-            let paid = 0;
-            gameState.players.forEach((p, i) => {
-                if (i !== activePlayerIndex && !p.bankrupt) {
-                    p.cash += action.amount;
-                    paid += action.amount;
-                }
-            });
-            player.cash -= paid;
-            message = `Paid $${action.amount} to each player ($${paid} total)`;
-            break;
-        }
-
-        case 'get_out_of_jail':
-            player.hasGetOutOfJailCard = true;
-            message = 'Got Out of Jail Free card!';
-            break;
-
-        case 'repairs': {
-            let houses = 0, hotels = 0;
-            gameState.properties.forEach(p => {
-                if (p.ownerId === player.userId) {
-                    if (p.houses === 5) hotels++;
-                    else houses += (p.houses || 0);
-                }
-            });
-            const cost = action.perHouse * houses + action.perHotel * hotels;
-            player.cash -= cost;
-            message = `Paid $${cost} for repairs (${houses} house(s), ${hotels} hotel(s))`;
-            break;
-        }
-
-        default:
-            message = 'Card applied';
-    }
-
-    return { gameState, message };
-}
-
-// ---------------------------------------------------------------------------
-// Board rendering
-// ---------------------------------------------------------------------------
-
 function renderSquare(square, gameState, currentUserId, playerIndex) {
     const { row, col } = getGridCoords(square.position);
     const edgeClass = getEdgeClass(square.position);
@@ -312,9 +105,10 @@ function renderSquare(square, gameState, currentUserId, playerIndex) {
     const tokenHtml = playersHere.map((p, i) => {
         const pIdx = gameState.players.indexOf(p);
         const color = PLAYER_COLORS[pIdx % PLAYER_COLORS.length];
-        const initials = p.name.substring(0, 2).toUpperCase();
+        const initials = escapeHtml(p.name.substring(0, 2).toUpperCase());
+        const playerName = escapeAttr(p.name);
         const isCurrent = p.userId === currentUserId;
-        return `<div class="player-token${isCurrent ? ' current-user-token' : ''}" style="background:${color}" title="${p.name}">${initials}</div>`;
+        return `<div class="player-token${isCurrent ? ' current-user-token' : ''}" style="background:${color}" title="${playerName}">${initials}</div>`;
     }).join('');
 
     // Houses/hotel on property
@@ -338,7 +132,7 @@ function renderSquare(square, gameState, currentUserId, playerIndex) {
         if (prop && prop.ownerId) {
             const ownerIdx = gameState.players.findIndex(p => p.userId === prop.ownerId);
             const ownerColor = PLAYER_COLORS[ownerIdx % PLAYER_COLORS.length];
-            ownerDot = `<div class="owner-dot" style="background:${ownerColor}" title="Owned by ${prop.ownerName || ''}"></div>`;
+            ownerDot = `<div class="owner-dot" style="background:${ownerColor}" title="Owned by ${escapeAttr(prop.ownerName || '')}"></div>`;
         }
     }
 
@@ -366,25 +160,18 @@ function renderSquare(square, gameState, currentUserId, playerIndex) {
     const displayName = square.name.length > 14
         ? square.name.substring(0, 13) + '…'
         : square.name;
+    const safeName = escapeAttr(square.name);
+    const safeDisplayName = escapeHtml(displayName);
 
     return `<div class="board-square ${edgeClass}${cornerClass} ${typeClass}"
                  style="grid-row:${row};grid-column:${col};"
-                 title="${square.name}">
+                 title="${safeName}">
         ${colorBandHtml}
-        <div class="square-name">${displayName}</div>
+        <div class="square-name">${safeDisplayName}</div>
         ${ownerDot}
         ${houseHtml}
         <div class="player-tokens">${tokenHtml}</div>
     </div>`;
-}
-
-function boardEscape(value) {
-    return String(value == null ? '' : value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
 }
 
 function getSquareProperty(square, gameState) {
@@ -402,8 +189,8 @@ function renderMobileTokens(players, gameState, currentUserId) {
         ${players.map(p => {
             const pIdx = gameState.players.indexOf(p);
             const color = PLAYER_COLORS[pIdx % PLAYER_COLORS.length];
-            const initials = boardEscape(p.name.substring(0, 2).toUpperCase());
-            const label = boardEscape(p.name);
+            const initials = escapeHtml(p.name.substring(0, 2).toUpperCase());
+            const label = escapeAttr(p.name);
             return `<span class="mobile-player-token${p.userId === currentUserId ? ' is-you' : ''}"
                 style="--token-color:${color}" title="${label}">${initials}</span>`;
         }).join('')}
@@ -412,7 +199,7 @@ function renderMobileTokens(players, gameState, currentUserId) {
 
 function renderMobileSquareMeta(square, property) {
     if (property) {
-        const owner = property.ownerName ? boardEscape(property.ownerName) : 'Unowned';
+        const owner = property.ownerName ? escapeHtml(property.ownerName) : 'Unowned';
         const price = property.price != null ? `$${property.price}` : '';
         const houses = property.houses > 0
             ? `<span>${property.houses === 5 ? 'Hotel' : `${property.houses} house${property.houses === 1 ? '' : 's'}`}</span>`
@@ -435,7 +222,7 @@ function renderMobileSquareMeta(square, property) {
         free_parking: 'Free Parking',
         go_to_jail: 'Go to Jail',
     };
-    return `<div class="mobile-square-meta"><span>${typeLabels[square.type] || boardEscape(square.type)}</span></div>`;
+    return `<div class="mobile-square-meta"><span>${typeLabels[square.type] || escapeHtml(square.type)}</span></div>`;
 }
 
 function renderMobileBoardSquare(square, gameState, currentUserId, options = {}) {
@@ -450,7 +237,7 @@ function renderMobileBoardSquare(square, gameState, currentUserId, options = {})
         <div class="mobile-square-main">
             <span class="mobile-square-position">${square.position}</span>
             <div class="mobile-square-copy">
-                <div class="mobile-square-name">${boardEscape(square.name)}</div>
+                <div class="mobile-square-name">${escapeHtml(square.name)}</div>
                 ${renderMobileSquareMeta(square, property)}
             </div>
             ${renderMobileTokens(playersHere, gameState, currentUserId)}
@@ -464,7 +251,7 @@ function renderMobileBoard(gameState, currentUserId, controlsHtml, diceHtml, car
     const focusPlayer = myPlayer || currentPlayer || gameState.players[0];
     const focusPosition = focusPlayer ? (focusPlayer.position || 0) : 0;
     const focusSquare = BOARD_SQUARES[focusPosition] || BOARD_SQUARES[0];
-    const currentTurnName = currentPlayer ? boardEscape(currentPlayer.name) : 'Waiting';
+    const currentTurnName = currentPlayer ? escapeHtml(currentPlayer.name) : 'Waiting';
 
     const upcomingHtml = Array.from({ length: 5 }, (_, i) => {
         const square = BOARD_SQUARES[(focusPosition + i + 1) % BOARD_SQUARES.length];
@@ -484,8 +271,8 @@ function renderMobileBoard(gameState, currentUserId, controlsHtml, diceHtml, car
         return `<div class="mobile-board-player${currentClass}${youClass}">
             <span class="mobile-player-dot" style="--token-color:${color}"></span>
             <div>
-                <div class="mobile-player-name">${boardEscape(p.name)}${p.userId === currentUserId ? ' <span>You</span>' : ''}</div>
-                <div class="mobile-player-location">${boardEscape(square.name)}</div>
+                <div class="mobile-player-name">${escapeHtml(p.name)}${p.userId === currentUserId ? ' <span>You</span>' : ''}</div>
+                <div class="mobile-player-location">${escapeHtml(square.name)}</div>
             </div>
             <strong>$${Math.round(p.cash || 0)}</strong>
         </div>`;
@@ -495,7 +282,7 @@ function renderMobileBoard(gameState, currentUserId, controlsHtml, diceHtml, car
         <section class="mobile-board-hero">
             <div>
                 <p class="mobile-board-label">${focusPlayer && focusPlayer.userId === currentUserId ? 'Your position' : 'Current position'}</p>
-                <h2>${boardEscape(focusSquare.name)}</h2>
+                <h2>${escapeHtml(focusSquare.name)}</h2>
                 ${renderMobileSquareMeta(focusSquare, getSquareProperty(focusSquare, gameState))}
             </div>
             ${renderMobileTokens(getPlayersOnSquare(gameState, focusSquare.position), gameState, currentUserId)}
@@ -562,7 +349,7 @@ function renderBoard(gameState, currentUserId) {
     // Roll button
     let rollBtnHtml = '';
     if (isMyTurn && !myDiceRolled) {
-        rollBtnHtml = `<button class="btn btn-primary" onclick="rollDiceAndMove()" style="margin:4px;">Roll Dice</button>`;
+        rollBtnHtml = `<button class="btn btn-primary" data-game-action="roll-dice" style="margin:4px;">Roll Dice</button>`;
     }
 
     // Buy Houses button
@@ -570,7 +357,7 @@ function renderBoard(gameState, currentUserId) {
     if (isMyTurn && myPlayer) {
         const hasCompleteGroup = hasCompleteColorGroup(myPlayer.userId, gameState);
         if (hasCompleteGroup) {
-            houseBtnHtml = `<button class="btn btn-success" onclick="openHouseModal()" style="margin:4px;">Buy Houses</button>`;
+            houseBtnHtml = `<button class="btn btn-success" data-game-action="open-house" style="margin:4px;">Buy Houses</button>`;
         }
     }
 
@@ -582,7 +369,7 @@ function renderBoard(gameState, currentUserId) {
         const bankruptNote = p.bankrupt ? ' (Bankrupt)' : '';
         return `<div class="board-standing-row${isActive ? ' active-turn' : ''}${p.inJail ? ' in-jail' : ''}">
             <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle;"></span>
-            <span style="flex:1">${p.name}${jailNote}${bankruptNote}</span>
+            <span style="flex:1">${escapeHtml(p.name)}${jailNote}${bankruptNote}</span>
             <span>$${Math.round(p.cash)}</span>
             <span style="margin-left:8px;color:#888;font-size:0.7rem;">pos:${p.position || 0}</span>
         </div>`;
@@ -591,14 +378,14 @@ function renderBoard(gameState, currentUserId) {
     // Last card drawn
     const lastCard = gameState.lastCardDrawn;
     const cardHtml = lastCard
-        ? `<div class="board-card-text">"${lastCard.text}"</div>`
+        ? `<div class="board-card-text">"${escapeHtml(lastCard.text)}"</div>`
         : '';
 
     // Center panel
     const centerHtml = `
         <div class="center-panel">
             <div style="text-align:center;font-weight:bold;color:#2c3e50;margin-bottom:4px;">
-                ${currentPlayer ? currentPlayer.name + "'s turn" : ''}
+                ${currentPlayer ? `${escapeHtml(currentPlayer.name)}'s turn` : ''}
             </div>
             ${diceHtml}
             <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;">
@@ -679,9 +466,7 @@ function getCompleteGroupProperties(userId, gameState) {
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
-        calculateRent, hasCompleteColorGroup, getCompleteGroupProperties,
-        shuffleDeck, findNearestType, applyCardEffect,
+        hasCompleteColorGroup, getCompleteGroupProperties,
         BOARD_SQUARES, HOUSE_COSTS, PLAYER_COLORS,
-        CHANCE_CARDS, COMMUNITY_CHEST_CARDS,
     };
 }

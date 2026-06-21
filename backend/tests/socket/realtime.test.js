@@ -5,6 +5,12 @@ process.env.JWT_SECRET = 'test-secret';
 
 const request = require('supertest');
 const { io: ioClient } = require('socket.io-client');
+const {
+    buildGameState,
+    createRoomFixture,
+    createUserFixture,
+    resetTestDb,
+} = require('../helpers/fixtures');
 
 let app, server, io, db;
 let serverPort;
@@ -29,7 +35,7 @@ afterAll((done) => {
 });
 
 beforeEach(() => {
-    db.exec(`DELETE FROM game_events; DELETE FROM games; DELETE FROM room_members; DELETE FROM rooms; DELETE FROM otps; DELETE FROM users;`);
+    resetTestDb(db);
 });
 
 function makeClient(token) {
@@ -65,7 +71,6 @@ function waitForEvent(client, event, timeout = 3000) {
 // ---------------------------------------------------------------------------
 describe('Socket.io Connection', () => {
     test('client connects with valid token, socket.connected = true', async () => {
-        const { createUserFixture } = require('../helpers/fixtures');
         const { token } = createUserFixture(db);
         const client = makeClient(token);
 
@@ -100,7 +105,6 @@ describe('Socket.io Connection', () => {
 // ---------------------------------------------------------------------------
 describe('Room channel', () => {
     test('after join_room, client is in room socket channel', async () => {
-        const { createUserFixture, createRoomFixture } = require('../helpers/fixtures');
         const { id: uid, token } = createUserFixture(db);
         const room = createRoomFixture(db, uid, { inviteCode: 'SCKT01', maxPlayers: 4 });
 
@@ -116,7 +120,6 @@ describe('Room channel', () => {
     });
 
     test('client can leave_room channel', async () => {
-        const { createUserFixture, createRoomFixture } = require('../helpers/fixtures');
         const { id: uid, token } = createUserFixture(db);
         const room = createRoomFixture(db, uid, { inviteCode: 'SCKT02' });
 
@@ -133,7 +136,6 @@ describe('Room channel', () => {
     });
 
     test('client in room A does not receive broadcasts for room B', async () => {
-        const { createUserFixture, createRoomFixture } = require('../helpers/fixtures');
         const { id: uid1, token: t1 } = createUserFixture(db);
         const { id: uid2, token: t2 } = createUserFixture(db);
         const { id: uid3, token: t3 } = createUserFixture(db);
@@ -162,7 +164,6 @@ describe('Room channel', () => {
     });
 
     test('two clients in same room both receive the same broadcast (if emitted)', async () => {
-        const { createUserFixture, createRoomFixture } = require('../helpers/fixtures');
         const { id: uid1, token: t1 } = createUserFixture(db);
         const { id: uid2, token: t2 } = createUserFixture(db);
         const { id: uid3, token: t3 } = createUserFixture(db);
@@ -211,7 +212,6 @@ describe('Room channel', () => {
 // ---------------------------------------------------------------------------
 describe('game:state_update broadcasts', () => {
     test('POST /api/games/:id/actions updates DB and triggers game:state_update if subscribed', async () => {
-        const { createUserFixture, createRoomFixture, buildGameState } = require('../helpers/fixtures');
         const { id: uid1, token: t1 } = createUserFixture(db);
         const { id: uid2, token: t2 } = createUserFixture(db);
 
@@ -254,7 +254,6 @@ describe('game:state_update broadcasts', () => {
     });
 
     test('client in different room does not receive game update', async () => {
-        const { createUserFixture, createRoomFixture, buildGameState } = require('../helpers/fixtures');
         const { id: uid1, token: t1 } = createUserFixture(db);
         const { id: uid2, token: t2 } = createUserFixture(db);
 

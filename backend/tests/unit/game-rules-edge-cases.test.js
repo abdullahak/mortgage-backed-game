@@ -605,6 +605,95 @@ describe('game rule edge cases', () => {
             .toThrow('Dice already rolled this turn');
     });
 
+    test('rolling from Jail does not automatically use a Get Out of Jail Free card', () => {
+        const state = makeState({
+            players: [
+                makePlayer('alice', 'Alice', { position: 10, inJail: true, hasGetOutOfJailCard: true }),
+                makePlayer('bob', 'Bob'),
+            ],
+        });
+
+        const result = applyAction(state, 'alice', { type: 'roll_dice', payload: {} }, { dice: [1, 2] });
+        const alice = result.state.players.find(player => player.userId === 'alice');
+
+        expect(alice.inJail).toBe(true);
+        expect(alice.position).toBe(10);
+        expect(alice.jailTurns).toBe(1);
+        expect(alice.diceRolled).toBe(true);
+        expect(alice.hasGetOutOfJailCard).toBe(true);
+        expect(result.state.gameLog.some(entry => entry.message.includes('used a Get Out of Jail Free card'))).toBe(false);
+    });
+
+    test('paying the Jail fine releases the player before their move roll', () => {
+        const state = makeState({
+            players: [
+                makePlayer('alice', 'Alice', { cash: 40, position: 10, inJail: true, jailTurns: 2 }),
+                makePlayer('bob', 'Bob'),
+            ],
+        });
+
+        const paid = applyAction(state, 'alice', { type: 'pay_jail_fine', payload: {} });
+        const aliceAfterFine = paid.state.players.find(player => player.userId === 'alice');
+
+        expect(aliceAfterFine.inJail).toBe(false);
+        expect(aliceAfterFine.position).toBe(10);
+        expect(aliceAfterFine.cash).toBe(-10);
+        expect(aliceAfterFine.jailTurns).toBe(0);
+        expect(aliceAfterFine.diceRolled).toBe(false);
+        expect(paid.state.turnCashFlow.alice.paid).toBe(50);
+        expect(paid.events.some(event =>
+            event.type === 'jail_fine_paid' &&
+            event.data.player === 'Alice' &&
+            event.data.amount === 50
+        )).toBe(true);
+
+        const rolled = applyAction(paid.state, 'alice', { type: 'roll_dice', payload: {} }, { dice: [3, 4] });
+        const aliceAfterRoll = rolled.state.players.find(player => player.userId === 'alice');
+
+        expect(aliceAfterRoll.position).toBe(17);
+        expect(aliceAfterRoll.diceRolled).toBe(true);
+    });
+
+    test('using a Get Out of Jail Free card releases the player before their move roll', () => {
+        const state = makeState({
+            players: [
+                makePlayer('alice', 'Alice', { position: 10, inJail: true, jailTurns: 2, hasGetOutOfJailCard: true }),
+                makePlayer('bob', 'Bob'),
+            ],
+        });
+
+        const released = applyAction(state, 'alice', { type: 'use_get_out_of_jail_card', payload: {} });
+        const aliceAfterCard = released.state.players.find(player => player.userId === 'alice');
+
+        expect(aliceAfterCard.inJail).toBe(false);
+        expect(aliceAfterCard.position).toBe(10);
+        expect(aliceAfterCard.jailTurns).toBe(0);
+        expect(aliceAfterCard.diceRolled).toBe(false);
+        expect(aliceAfterCard.hasGetOutOfJailCard).toBe(false);
+        expect(released.events.some(event =>
+            event.type === 'jail_card_used' &&
+            event.data.player === 'Alice'
+        )).toBe(true);
+
+        const rolled = applyAction(released.state, 'alice', { type: 'roll_dice', payload: {} }, { dice: [1, 3] });
+        const aliceAfterRoll = rolled.state.players.find(player => player.userId === 'alice');
+
+        expect(aliceAfterRoll.position).toBe(14);
+        expect(aliceAfterRoll.diceRolled).toBe(true);
+    });
+
+    test('using a Get Out of Jail Free card requires having one', () => {
+        const state = makeState({
+            players: [
+                makePlayer('alice', 'Alice', { position: 10, inJail: true }),
+                makePlayer('bob', 'Bob'),
+            ],
+        });
+
+        expect(() => applyAction(state, 'alice', { type: 'use_get_out_of_jail_card', payload: {} }))
+            .toThrow('No Get Out of Jail Free card available');
+    });
+
     test('forced Jail bail can trigger bank-return bankruptcy on end turn', () => {
         const state = makeState({
             players: [
@@ -870,6 +959,58 @@ describe('game rule edge cases', () => {
             .toThrow('Corporation is insolvent');
         expect(() => applyAction(state, 'alice', { type: 'support_chairman_vote', payload: { corpId: 'corp-1', voteId: 'vote-1' } }))
             .toThrow('Corporation is insolvent');
+    });
+
+    test('refinance debt replaces selected loans and pays out only net new cash', () => {
+        const state = makeState();
+        ownProperty(state, 'prop-0', 'alice', 'Alice');
+        state.players[0].cash = 200;
+        state.players[0].debts = [
+            { id: 'debt-1', principal: 100, interestRate: 8, collateral: [{ id: 'prop-0', name: 'Mediterranean Avenue', value: 60 }] },
+            { id: 'debt-2', principal: 50, interestRate: 10, collateral: [] },
+            { id: 'debt-3', principal: 25, interestRate: 5, collateral: [] },
+        ];
+
+        const result = applyAction(state, 'alice', {
+            type: 'refinance_debt',
+            payload: {
+                debtIds: ['debt-1', 'debt-2'],
+                amount: 200,
+                collateralIds: ['prop-0'],
+            },
+        });
+
+        const alice = result.state.players[0];
+        expect(alice.cash).toBe(250);
+        expect(alice.debts).toHaveLength(2);
+        expect(alice.debts.find(debt => debt.id === 'debt-3').principal).toBe(25);
+
+        const newDebt = alice.debts.find(debt => debt.refinancedFrom);
+        expect(newDebt.principal).toBe(200);
+        expect(newDebt.interestRate).toBe(5);
+        expect(newDebt.collateral).toEqual([{ id: 'prop-0', name: 'Mediterranean Avenue', value: 60 }]);
+        expect(newDebt.refinancedFrom).toEqual([
+            { id: 'debt-1', principal: 100, interestRate: 8 },
+            { id: 'debt-2', principal: 50, interestRate: 10 },
+        ]);
+
+        const event = result.events.find(item => item.type === 'debt_refinanced');
+        expect(event.data.payoffAmount).toBe(150);
+        expect(event.data.netProceeds).toBe(50);
+        expect(result.state.turnCashFlow.alice.received).toBe(200);
+        expect(result.state.turnCashFlow.alice.paid).toBe(150);
+    });
+
+    test('refinance debt requires a larger loan than the selected payoff', () => {
+        const state = makeState();
+        state.players[0].debts = [
+            { id: 'debt-1', principal: 100, interestRate: 8, collateral: [] },
+        ];
+
+        expect(() => applyAction(state, 'alice', {
+            type: 'refinance_debt',
+            payload: { debtIds: ['debt-1'], amount: 100 },
+        })).toThrow('Refinance amount must exceed selected debt principal');
     });
 
     test('host can pause and resume while normal actions are blocked', () => {

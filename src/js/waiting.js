@@ -1,19 +1,20 @@
-// Waiting room page with real-time updates
-
 let currentRoom = null;
 let currentUser = null;
 let roomSubscription = null;
 let isHost = false;
+const ROOM_STATUS_LABELS = {
+    waiting: 'Waiting for players',
+    in_progress: 'Game in progress',
+    completed: 'Game completed'
+};
 
-// Get params from URL
 const urlParams = new URLSearchParams(window.location.search);
 const roomId = urlParams.get('room');
 const roomCode = urlParams.get('code'); // unauthenticated join path
+const normalizedRoomCode = normalizeInviteCode(roomCode);
 
-// Initialize waiting room
 async function initWaitingRoom() {
     if (roomCode) {
-        // Guest join path: show name form, sign in anonymously after submission
         await showGuestJoinSection();
         return;
     }
@@ -24,7 +25,6 @@ async function initWaitingRoom() {
         return;
     }
 
-    // Authenticated path (host or returning member)
     const user = await requireAuth();
     if (!user) return;
 
@@ -34,12 +34,11 @@ async function initWaitingRoom() {
         emailDisplay.textContent = currentUser.email || 'Guest';
     }
 
-    await loadRoomData();
-    subscribeToRoomUpdates();
-    checkGameStatus();
+    await loadRoomDataById(roomId);
+    subscribeToRoomUpdatesById(roomId);
+    checkGameStatusById(roomId);
 }
 
-// Show guest join UI
 async function showGuestJoinSection() {
     document.getElementById('waiting-room-section').style.display = 'none';
     document.getElementById('guest-join-section').style.display = 'block';
@@ -47,14 +46,14 @@ async function showGuestJoinSection() {
     if (leaveBtn) leaveBtn.style.display = 'none';
 
     const codeInput = document.getElementById('guest-room-code');
-    if (codeInput) codeInput.value = roomCode.toUpperCase();
+    if (codeInput) codeInput.value = normalizedRoomCode;
 
     const optionsEl = document.getElementById('hotseat-resume-options');
-    const hasLocalHotseatResume = renderHotseatResumeOptions(optionsEl, roomCode);
+    const hasLocalHotseatResume = renderHotseatResumeOptions(optionsEl, normalizedRoomCode);
     if (!hasLocalHotseatResume) {
         try {
-            const room = await apiFetch(`/rooms/by-code/${roomCode.toUpperCase()}`);
-            const hasExistingPlayerResume = renderExistingRoomMemberOptions(optionsEl, roomCode, room);
+            const room = await apiFetch(`/rooms/by-code/${normalizedRoomCode}`);
+            const hasExistingPlayerResume = renderExistingRoomMemberOptions(optionsEl, normalizedRoomCode, room);
             setGuestJoinFormVisible(!hasExistingPlayerResume);
         } catch (err) {
             console.warn('Could not load room resume options:', err);
@@ -79,7 +78,6 @@ function setGuestJoinFormVisible(visible) {
     if (joinBtn) joinBtn.style.display = visible ? '' : 'none';
 }
 
-// Guest joins with anonymous session
 async function joinAsGuest() {
     const playerName = document.getElementById('guest-player-name').value.trim();
     const errorEl = document.getElementById('guest-join-error');
@@ -97,17 +95,14 @@ async function joinAsGuest() {
     btn.textContent = 'Joining...';
 
     try {
-        // Sign in anonymously
         const anonData = await apiFetch('/auth/anonymous', { method: 'POST' });
         localStorage.setItem('auth_token', anonData.token);
         currentUser = anonData.user;
         createdAnonymousSession = true;
 
-        // Join room by code
-        const room = await joinRoomByCode(roomCode, playerName);
+        const room = await joinRoomByCode(normalizedRoomCode, playerName);
         currentRoom = room;
 
-        // Switch to waiting room UI
         document.getElementById('guest-join-section').style.display = 'none';
         document.getElementById('waiting-room-section').style.display = 'block';
         const leaveBtn = document.getElementById('leave-room-btn');
@@ -116,7 +111,6 @@ async function joinAsGuest() {
         const emailDisplay = document.getElementById('user-email');
         if (emailDisplay) emailDisplay.textContent = playerName;
 
-        // Use room.id going forward
         history.replaceState(null, '', `waiting.html?room=${room.id}`);
 
         await loadRoomDataById(room.id);
@@ -142,11 +136,6 @@ async function joinAsGuest() {
 
 function isExpectedGuestJoinError(error) {
     return error && [400, 403, 404].includes(error.status);
-}
-
-// Load room data (uses module-level roomId)
-async function loadRoomData() {
-    await loadRoomDataById(roomId);
 }
 
 async function loadRoomDataById(id) {
@@ -179,17 +168,10 @@ async function loadRoomDataById(id) {
     }
 }
 
-// Subscribe to real-time room updates
-function subscribeToRoomUpdates() {
-    subscribeToRoomUpdatesById(roomId);
-}
-
 function subscribeToRoomUpdatesById(id) {
     roomSubscription = subscribeToRoom(
         id,
-        // onMemberChange
         async (room) => {
-            console.log('Room member update:', room);
             currentRoom = room;
             renderPlayers(room.room_members);
             document.getElementById('player-count').textContent =
@@ -197,9 +179,7 @@ function subscribeToRoomUpdatesById(id) {
             updateStartButtonState(room.room_members.length);
             logActivity('Player list updated');
         },
-        // onStatusChange
         async (room) => {
-            console.log('Room status update:', room);
             updateRoomStatus(room.status, room.room_members ? room.room_members.length : undefined, room.max_players);
             if (room.status === 'in_progress') {
                 logActivity('Game is starting!');
@@ -211,7 +191,6 @@ function subscribeToRoomUpdatesById(id) {
     );
 }
 
-// Render players list
 function renderPlayers(members) {
     const container = document.getElementById('players-list');
 
@@ -236,7 +215,6 @@ function renderPlayers(members) {
     `).join('');
 }
 
-// Update room status display
 function updateRoomStatus(status, playerCount, maxPlayers) {
     const statusEl = document.getElementById('room-status');
 
@@ -245,16 +223,10 @@ function updateRoomStatus(status, playerCount, maxPlayers) {
         statusEl.textContent = 'Room Full';
     } else {
         statusEl.className = `room-status ${status}`;
-        const statusText = {
-            'waiting': 'Waiting for players',
-            'in_progress': 'Game in progress',
-            'completed': 'Game completed'
-        };
-        statusEl.textContent = statusText[status] || status;
+        statusEl.textContent = ROOM_STATUS_LABELS[status] || status;
     }
 }
 
-// Update start button state
 function updateStartButtonState(playerCount) {
     const startBtn = document.getElementById('start-game-btn');
     if (!isHost || !startBtn) return;
@@ -272,24 +244,26 @@ function updateStartButtonState(playerCount) {
     }
 }
 
-// Copy invite code to clipboard
-function copyInviteCode() {
+function copyInviteCode(btn) {
     const code = document.getElementById('invite-code').textContent;
-    const btn = event.target;
     const originalText = btn.textContent;
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(code).then(() => {
-            btn.textContent = 'Copied!';
-            btn.style.background = 'linear-gradient(45deg, #2ecc71, #27ae60)';
-            setTimeout(() => {
-                btn.textContent = originalText;
-                btn.style.background = '';
-            }, 2000);
+            showCopySuccess(btn, originalText);
         }).catch(() => fallbackCopyToClipboard(code, btn, originalText));
     } else {
         fallbackCopyToClipboard(code, btn, originalText);
     }
+}
+
+function showCopySuccess(btn, originalText) {
+    btn.textContent = 'Copied!';
+    btn.style.background = 'linear-gradient(45deg, #2ecc71, #27ae60)';
+    setTimeout(() => {
+        btn.textContent = originalText;
+        btn.style.background = '';
+    }, 2000);
 }
 
 function fallbackCopyToClipboard(text, btn, originalText) {
@@ -303,12 +277,7 @@ function fallbackCopyToClipboard(text, btn, originalText) {
     try {
         const successful = document.execCommand('copy');
         if (successful) {
-            btn.textContent = 'Copied!';
-            btn.style.background = 'linear-gradient(45deg, #2ecc71, #27ae60)';
-            setTimeout(() => {
-                btn.textContent = originalText;
-                btn.style.background = '';
-            }, 2000);
+            showCopySuccess(btn, originalText);
         } else {
             alert('Code: ' + text + '\n\nPlease copy manually.');
         }
@@ -319,7 +288,6 @@ function fallbackCopyToClipboard(text, btn, originalText) {
     }
 }
 
-// Invite friend by email (host only)
 async function sendInviteEmail() {
     const emailInput = document.getElementById('invite-email');
     const email = emailInput.value.trim();
@@ -331,7 +299,6 @@ async function sendInviteEmail() {
     statusEl.style.color = '';
 
     await callSendRoomCode({
-        action: 'invite_friend',
         email,
         inviteCode: currentRoom.invite_code,
         roomName: currentRoom.name
@@ -342,7 +309,6 @@ async function sendInviteEmail() {
     emailInput.value = '';
 }
 
-// Start game (host only)
 async function startGameFromLobby() {
     if (!isHost) {
         alert('Only the host can start the game');
@@ -359,45 +325,8 @@ async function startGameFromLobby() {
         startBtn.disabled = true;
         startBtn.textContent = 'Starting game...';
 
-        const initialGameState = {
-            players: currentRoom.room_members.map(member => ({
-                userId: member.user_id,
-                name: member.player_name,
-                cash: 1500,
-                properties: [],
-                corporations: [],
-                debts: [],
-                netWorth: 1500,
-                bankrupt: false,
-                position: 0,
-                inJail: false,
-                jailTurns: 0,
-                hasGetOutOfJailCard: false,
-                doubleCount: 0,
-                diceRolled: false,
-            })),
-            currentPlayerIndex: 0,
-            properties: MONOPOLY_PROPERTIES.map((prop, i) => ({
-                ...prop,
-                id: `prop-${i}`,
-                ownerId: null,
-                ownerName: null,
-                houses: 0,
-            })),
-            corporations: [],
-            gameLog: [],
-            settings: {
-                interestRate: 5,
-                passGoAmount: 200
-            },
-            chanceCards: shuffleDeck(CHANCE_CARDS),
-            communityChestCards: shuffleDeck(COMMUNITY_CHEST_CARDS),
-            lastDiceRoll: null,
-            lastCardDrawn: null,
-        };
-
         const activeRoomId = currentRoom.id;
-        const game = await startGame(activeRoomId, initialGameState);
+        await startGame(activeRoomId);
 
         logActivity('Game started! Redirecting...');
 
@@ -415,7 +344,6 @@ async function startGameFromLobby() {
     }
 }
 
-// Leave room
 async function leaveRoom() {
     if (!confirm('Are you sure you want to leave this room?')) return;
 
@@ -438,11 +366,6 @@ async function leaveRoom() {
     }
 }
 
-// Check if game has already started
-async function checkGameStatus() {
-    await checkGameStatusById(roomId);
-}
-
 async function checkGameStatusById(id) {
     try {
         const game = await getGameByRoomId(id);
@@ -454,7 +377,6 @@ async function checkGameStatusById(id) {
     }
 }
 
-// Log activity
 function logActivity(message) {
     const logContainer = document.getElementById('activity-log');
     const timestamp = new Date().toLocaleTimeString();
@@ -470,19 +392,26 @@ function logActivity(message) {
     }
 }
 
-// escapeHtml and formatTimeAgo are defined in supabase.js
-// MONOPOLY_PROPERTIES is defined in game-data.js
-
-// Cleanup on page unload
 window.addEventListener('beforeunload', () => {
     if (roomSubscription) {
         roomSubscription.unsubscribe();
     }
 });
 
-// Initialize on page load
+function bindWaitingRoomActions() {
+    document.getElementById('leave-room-btn')?.addEventListener('click', leaveRoom);
+    document.getElementById('guest-join-btn')?.addEventListener('click', joinAsGuest);
+    document.getElementById('copy-invite-code-btn')?.addEventListener('click', event => copyInviteCode(event.currentTarget));
+    document.getElementById('start-game-btn')?.addEventListener('click', startGameFromLobby);
+    document.getElementById('send-invite-btn')?.addEventListener('click', sendInviteEmail);
+}
+
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initWaitingRoom);
+    document.addEventListener('DOMContentLoaded', () => {
+        bindWaitingRoomActions();
+        initWaitingRoom();
+    });
 } else {
+    bindWaitingRoomActions();
     initWaitingRoom();
 }

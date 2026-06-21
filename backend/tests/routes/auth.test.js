@@ -5,6 +5,7 @@ process.env.JWT_SECRET = 'test-secret';
 
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
+const { createOtpFixture, createUserFixture, resetTestDb } = require('../helpers/fixtures');
 
 let app, db;
 
@@ -16,8 +17,7 @@ beforeAll(() => {
 });
 
 afterEach(() => {
-    // Clear all tables between tests
-    db.exec(`DELETE FROM game_events; DELETE FROM games; DELETE FROM room_members; DELETE FROM rooms; DELETE FROM otps; DELETE FROM users;`);
+    resetTestDb(db);
 });
 
 // ---------------------------------------------------------------------------
@@ -68,6 +68,23 @@ describe('POST /api/auth/send-otp', () => {
         expect(res.status).toBe(400);
     });
 
+    test('400 with non-string email', async () => {
+        const res = await request(app)
+            .post('/api/auth/send-otp')
+            .send({ email: 12345 });
+        expect(res.status).toBe(400);
+    });
+
+    test('normalizes email whitespace before storing OTP', async () => {
+        const res = await request(app)
+            .post('/api/auth/send-otp')
+            .send({ email: '  Trim@Test.COM  ' });
+
+        expect(res.status).toBe(200);
+        const otp = db.prepare(`SELECT * FROM otps WHERE email = ?`).get('trim@test.com');
+        expect(otp).toBeTruthy();
+    });
+
     test('creates OTP record in DB with 10-min expiry', async () => {
         await request(app)
             .post('/api/auth/send-otp')
@@ -113,24 +130,8 @@ describe('POST /api/auth/send-otp', () => {
 // POST /api/auth/verify-otp
 // ---------------------------------------------------------------------------
 describe('POST /api/auth/verify-otp', () => {
-    function toSqliteDate(d) {
-        // SQLite datetime('now') returns 'YYYY-MM-DD HH:MM:SS' (space, no T, no Z)
-        // We must use the same format so the > comparison works correctly
-        return d.toISOString().replace('T', ' ').slice(0, 19);
-    }
-
-    function insertOtp(email, code, { used = 0, expiredMinutesAgo = 0 } = {}) {
-        const { v4: uuidv4 } = require('uuid');
-        const id = uuidv4();
-        const expires = expiredMinutesAgo > 0
-            ? toSqliteDate(new Date(Date.now() - expiredMinutesAgo * 60 * 1000))
-            : toSqliteDate(new Date(Date.now() + 10 * 60 * 1000));
-        db.prepare(`INSERT INTO otps (id, email, code, expires_at, used) VALUES (?, ?, ?, ?, ?)`).run(id, email, code, expires, used);
-        return id;
-    }
-
     test('200 with valid email + code → returns token and user', async () => {
-        insertOtp('valid@example.com', '123456');
+        createOtpFixture(db, 'valid@example.com', '123456');
         const res = await request(app)
             .post('/api/auth/verify-otp')
             .send({ email: 'valid@example.com', token: '123456' });
@@ -142,7 +143,7 @@ describe('POST /api/auth/verify-otp', () => {
     });
 
     test('400 with wrong code', async () => {
-        insertOtp('wrong@example.com', '111111');
+        createOtpFixture(db, 'wrong@example.com', '111111');
         const res = await request(app)
             .post('/api/auth/verify-otp')
             .send({ email: 'wrong@example.com', token: '999999' });
@@ -150,7 +151,7 @@ describe('POST /api/auth/verify-otp', () => {
     });
 
     test('400 with expired code', async () => {
-        insertOtp('expired@example.com', '222222', { expiredMinutesAgo: 15 });
+        createOtpFixture(db, 'expired@example.com', '222222', { expiredMinutesAgo: 15 });
         const res = await request(app)
             .post('/api/auth/verify-otp')
             .send({ email: 'expired@example.com', token: '222222' });
@@ -158,7 +159,7 @@ describe('POST /api/auth/verify-otp', () => {
     });
 
     test('400 with already-used code', async () => {
-        insertOtp('used@example.com', '333333', { used: 1 });
+        createOtpFixture(db, 'used@example.com', '333333', { used: 1 });
         const res = await request(app)
             .post('/api/auth/verify-otp')
             .send({ email: 'used@example.com', token: '333333' });
@@ -179,8 +180,25 @@ describe('POST /api/auth/verify-otp', () => {
         expect(res.status).toBe(400);
     });
 
+    test('400 with non-string email', async () => {
+        const res = await request(app)
+            .post('/api/auth/verify-otp')
+            .send({ email: 12345, token: '123456' });
+        expect(res.status).toBe(400);
+    });
+
+    test('normalizes email whitespace before verification', async () => {
+        createOtpFixture(db, 'trimverify@example.com', '123456');
+        const res = await request(app)
+            .post('/api/auth/verify-otp')
+            .send({ email: '  TrimVerify@Example.COM  ', token: '123456' });
+
+        expect(res.status).toBe(200);
+        expect(res.body.user.email).toBe('trimverify@example.com');
+    });
+
     test('creates new user if email not seen before', async () => {
-        insertOtp('newuser@example.com', '444444');
+        createOtpFixture(db, 'newuser@example.com', '444444');
         await request(app)
             .post('/api/auth/verify-otp')
             .send({ email: 'newuser@example.com', token: '444444' });
@@ -194,7 +212,7 @@ describe('POST /api/auth/verify-otp', () => {
         const { v4: uuidv4 } = require('uuid');
         const existingId = uuidv4();
         db.prepare(`INSERT INTO users (id, email, is_anonymous) VALUES (?, ?, 0)`).run(existingId, 'existing@example.com');
-        insertOtp('existing@example.com', '555555');
+        createOtpFixture(db, 'existing@example.com', '555555');
 
         const res = await request(app)
             .post('/api/auth/verify-otp')
@@ -205,7 +223,7 @@ describe('POST /api/auth/verify-otp', () => {
     });
 
     test('JWT token is valid and contains correct sub (userId)', async () => {
-        insertOtp('jwt@example.com', '666666');
+        createOtpFixture(db, 'jwt@example.com', '666666');
         const res = await request(app)
             .post('/api/auth/verify-otp')
             .send({ email: 'jwt@example.com', token: '666666' });
@@ -216,7 +234,7 @@ describe('POST /api/auth/verify-otp', () => {
     });
 
     test('OTP marked as used after successful verify', async () => {
-        insertOtp('mark@example.com', '777777');
+        createOtpFixture(db, 'mark@example.com', '777777');
         await request(app)
             .post('/api/auth/verify-otp')
             .send({ email: 'mark@example.com', token: '777777' });
@@ -262,7 +280,6 @@ describe('POST /api/auth/anonymous', () => {
 // ---------------------------------------------------------------------------
 describe('GET /api/auth/me', () => {
     test('200 with valid Bearer token → returns user', async () => {
-        const { createUserFixture } = require('../helpers/fixtures');
         const { id, email, token } = createUserFixture(db);
 
         const res = await request(app)
@@ -315,7 +332,6 @@ describe('GET /api/auth/me', () => {
 // ---------------------------------------------------------------------------
 describe('POST /api/auth/signout', () => {
     test('200 with valid token', async () => {
-        const { createUserFixture } = require('../helpers/fixtures');
         const { token } = createUserFixture(db);
 
         const res = await request(app)
@@ -330,7 +346,6 @@ describe('POST /api/auth/signout', () => {
     });
 
     test('response body includes ok: true', async () => {
-        const { createUserFixture } = require('../helpers/fixtures');
         const { token } = createUserFixture(db);
 
         const res = await request(app)

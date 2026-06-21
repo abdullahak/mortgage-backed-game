@@ -9,10 +9,16 @@ process.env.ROOM_CREATE_RATE_LIMIT_MAX = '1';
 process.env.ROOM_CREATE_RATE_LIMIT_WINDOW_MS = '60000';
 process.env.GAME_ACTION_RATE_LIMIT_MAX = '1';
 process.env.GAME_ACTION_RATE_LIMIT_WINDOW_MS = '60000';
-process.env.MANUAL_EVENT_RATE_LIMIT_MAX = '1';
-process.env.MANUAL_EVENT_RATE_LIMIT_WINDOW_MS = '60000';
 
 const request = require('supertest');
+const {
+    addRoomMemberFixture,
+    buildGameState,
+    createGameFixture,
+    createRoomFixture,
+    createUserFixture,
+    resetTestDb,
+} = require('../helpers/fixtures');
 
 let app, db;
 
@@ -24,7 +30,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-    db.exec(`DELETE FROM game_actions; DELETE FROM game_events; DELETE FROM games; DELETE FROM room_members; DELETE FROM rooms; DELETE FROM otps; DELETE FROM users;`);
+    resetTestDb(db);
 });
 
 afterAll(() => {
@@ -36,8 +42,6 @@ afterAll(() => {
         'ROOM_CREATE_RATE_LIMIT_WINDOW_MS',
         'GAME_ACTION_RATE_LIMIT_MAX',
         'GAME_ACTION_RATE_LIMIT_WINDOW_MS',
-        'MANUAL_EVENT_RATE_LIMIT_MAX',
-        'MANUAL_EVENT_RATE_LIMIT_WINDOW_MS',
     ].forEach(key => delete process.env[key]);
 });
 
@@ -58,7 +62,6 @@ describe('production rate limits', () => {
     });
 
     test('limits room creation per authenticated user', async () => {
-        const { createUserFixture } = require('../helpers/fixtures');
         const user = createUserFixture(db);
 
         await request(app)
@@ -96,41 +99,13 @@ describe('production rate limits', () => {
         expect(db.prepare(`SELECT COUNT(*) AS count FROM game_actions WHERE game_id = ?`).get(game.id).count).toBe(1);
     });
 
-    test('limits manual game event writes per game and actor', async () => {
-        const { user1, game } = createTwoPlayerGame();
-
-        await request(app)
-            .post(`/api/games/${game.id}/events`)
-            .set('Authorization', `Bearer ${user1.token}`)
-            .send({ event_type: 'note', event_data: { body: 'first' } })
-            .expect(200);
-
-        const limited = await request(app)
-            .post(`/api/games/${game.id}/events`)
-            .set('Authorization', `Bearer ${user1.token}`)
-            .send({ event_type: 'note', event_data: { body: 'second' } });
-
-        expect(limited.status).toBe(429);
-        expect(limited.body.error).toBe('Too many requests');
-        expect(db.prepare(`SELECT COUNT(*) AS count FROM game_events WHERE game_id = ?`).get(game.id).count).toBe(1);
-    });
 });
 
 function createTwoPlayerGame() {
-    const {
-        createUserFixture,
-        createRoomFixture,
-        createGameFixture,
-        buildGameState,
-    } = require('../helpers/fixtures');
-
     const user1 = createUserFixture(db);
     const user2 = createUserFixture(db);
     const room = createRoomFixture(db, user1.id, { maxPlayers: 4 });
-    db.prepare(`
-        INSERT INTO room_members (id, room_id, user_id, player_name)
-        VALUES (?, ?, ?, ?)
-    `).run(`member-${user2.id}`, room.id, user2.id, 'Bob');
+    addRoomMemberFixture(db, room.id, user2.id, 'Bob');
 
     const gameState = buildGameState(['Alice', 'Bob']);
     gameState.players[0].userId = user1.id;

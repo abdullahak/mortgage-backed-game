@@ -1,24 +1,21 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
-const { loginPage } = require('./helpers');
-
-const BASE = process.env.BASE_URL || 'http://100.110.102.49:3011';
-const BASE_API = process.env.API_BASE_URL || 'http://100.110.102.49:3111/api';
+const { BASE, BASE_API, apiJson, loginPage, playerState } = require('./helpers');
 
 async function setupThreePlayerGame(request, opts = {}) {
-    const host = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
-    const bob = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
-    const carol = await (await request.post(`${BASE_API}/auth/anonymous`)).json();
-    const room = await (await request.post(`${BASE_API}/rooms`, {
+    const host = await apiJson(request, 'post', `${BASE_API}/auth/anonymous`);
+    const bob = await apiJson(request, 'post', `${BASE_API}/auth/anonymous`);
+    const carol = await apiJson(request, 'post', `${BASE_API}/auth/anonymous`);
+    const room = await apiJson(request, 'post', `${BASE_API}/rooms`, {
         headers: { Authorization: `Bearer ${host.token}` },
         data: { name: `Host Cleanup Room ${Date.now()}`, player_name: 'Alice', max_players: 4 },
-    })).json();
+    });
 
-    await request.post(`${BASE_API}/rooms/${room.id}/join`, {
+    await apiJson(request, 'post', `${BASE_API}/rooms/${room.id}/join`, {
         headers: { Authorization: `Bearer ${bob.token}` },
         data: { player_name: 'Bob' },
     });
-    await request.post(`${BASE_API}/rooms/${room.id}/join`, {
+    await apiJson(request, 'post', `${BASE_API}/rooms/${room.id}/join`, {
         headers: { Authorization: `Bearer ${carol.token}` },
         data: { player_name: 'Carol' },
     });
@@ -39,37 +36,19 @@ async function setupThreePlayerGame(request, opts = {}) {
         lastCardDrawn: null,
         settings: { passGoAmount: 200, startingCash: 1500, interestRate: 5, ...(opts.settings || {}) },
     };
-    const game = await (await request.post(`${BASE_API}/games`, {
+    const game = await apiJson(request, 'post', `${BASE_API}/games`, {
         headers: { Authorization: `Bearer ${host.token}` },
         data: { room_id: room.id, game_state: gameState },
-    })).json();
+    });
 
     return { room, game, host, bob, carol };
-}
-
-function playerState(userId, name) {
-    return {
-        userId,
-        name,
-        cash: 1500,
-        position: 0,
-        bankrupt: false,
-        inJail: false,
-        jailTurns: 0,
-        doubleCount: 0,
-        diceRolled: false,
-        hasGetOutOfJailCard: false,
-        properties: [],
-        corporations: [],
-        debts: [],
-    };
 }
 
 test.describe('Host cleanup controls', () => {
     test('host can cancel a pending trade offer they are not part of', async ({ page, request }) => {
         const setup = await setupThreePlayerGame(request);
 
-        await request.post(`${BASE_API}/games/${setup.game.id}/actions`, {
+        await apiJson(request, 'post', `${BASE_API}/games/${setup.game.id}/actions`, {
             headers: { Authorization: `Bearer ${setup.bob.token}` },
             data: {
                 actionId: `host-cleanup-offer-${Date.now()}`,
@@ -97,9 +76,9 @@ test.describe('Host cleanup controls', () => {
         await expect(page.locator('#market-status')).toContainText('canceled by host', { timeout: 5000 });
         await expect(page.locator('#tradeOffersList')).toContainText('No pending trade offers');
 
-        const fetched = await (await request.get(`${BASE_API}/games/${setup.game.id}`, {
+        const fetched = await apiJson(request, 'get', `${BASE_API}/games/${setup.game.id}`, {
             headers: { Authorization: `Bearer ${setup.host.token}` },
-        })).json();
+        });
         expect(fetched.game_state.marketOffers[0].status).toBe('canceled');
         expect(fetched.game_state.marketOffers[0].cancelReason).toBe('host');
         expect(fetched.game_state.players.find(player => player.userId === setup.bob.user.id).cash).toBe(1500);
@@ -140,9 +119,9 @@ test.describe('Host cleanup controls', () => {
         await expect(page.locator('#market-status')).toContainText('expired and was cleared', { timeout: 5000 });
         await expect(page.locator('#tradeOffersList')).toContainText('No pending trade offers');
 
-        const fetched = await (await request.get(`${BASE_API}/games/${setup.game.id}`, {
+        const fetched = await apiJson(request, 'get', `${BASE_API}/games/${setup.game.id}`, {
             headers: { Authorization: `Bearer ${setup.host.token}` },
-        })).json();
+        });
         expect(fetched.game_state.marketOffers[0].status).toBe('expired');
         expect(fetched.game_state.marketOffers[0].cancelReason).toBe('timeout');
         expect(fetched.game_state.players.find(player => player.userId === setup.bob.user.id).cash).toBe(1500);
@@ -163,9 +142,9 @@ test.describe('Host cleanup controls', () => {
         await expect(page.getByRole('button', { name: 'Resume Game' })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Roll Dice' })).toBeHidden();
 
-        const paused = await (await request.get(`${BASE_API}/games/${setup.game.id}`, {
+        const paused = await apiJson(request, 'get', `${BASE_API}/games/${setup.game.id}`, {
             headers: { Authorization: `Bearer ${setup.host.token}` },
-        })).json();
+        });
         expect(paused.game_state.paused).toBe(true);
 
         const blocked = await request.post(`${BASE_API}/games/${setup.game.id}/actions`, {
@@ -185,9 +164,9 @@ test.describe('Host cleanup controls', () => {
         await expect(page.locator('#pausePanel')).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Pause Game' })).toBeVisible();
 
-        const resumed = await (await request.get(`${BASE_API}/games/${setup.game.id}`, {
+        const resumed = await apiJson(request, 'get', `${BASE_API}/games/${setup.game.id}`, {
             headers: { Authorization: `Bearer ${setup.host.token}` },
-        })).json();
+        });
         expect(resumed.game_state.paused).toBe(false);
         expect(resumed.game_state.pauseHistory[0].reason).toBe('Host paused the game');
     });
