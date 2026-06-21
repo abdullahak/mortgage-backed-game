@@ -1262,6 +1262,208 @@ body {
     color: #20352d;
 }
 
+.player-section-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 14px 0 8px;
+}
+
+.player-section-heading h4 {
+    margin: 0;
+    color: #2c3e50;
+    font-size: 1rem;
+}
+
+.player-section-heading span {
+    color: #687782;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.25;
+    text-align: right;
+}
+
+.owned-property-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 8px;
+}
+
+.owned-property-row {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr);
+    gap: 9px;
+    align-items: start;
+    min-width: 0;
+    padding: 9px 10px 10px 8px;
+    border: 1px solid #dce5e1;
+    border-left: 6px solid var(--property-color);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(32, 53, 45, 0.05);
+}
+
+.owned-property-icon {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    background: var(--property-color);
+    color: var(--property-ink);
+    font-size: 0.68rem;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: 0;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.owned-property-icon.type-street::before {
+    content: "";
+    position: absolute;
+    left: 8px;
+    bottom: 7px;
+    width: 14px;
+    height: 10px;
+    border-radius: 2px;
+    background: currentColor;
+}
+
+.owned-property-icon.type-street::after {
+    content: "";
+    position: absolute;
+    left: 10px;
+    top: 6px;
+    width: 10px;
+    height: 10px;
+    border-radius: 1px;
+    background: currentColor;
+    transform: rotate(45deg);
+}
+
+.owned-property-icon.type-utility {
+    font-size: 1rem;
+}
+
+.owned-property-copy {
+    min-width: 0;
+}
+
+.owned-property-title strong {
+    display: block;
+    color: #20352d;
+    font-size: 0.96rem;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.owned-property-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 10px;
+    margin-top: 3px;
+    color: #62716d;
+    font-size: 0.78rem;
+    line-height: 1.25;
+}
+
+.owned-property-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 7px;
+}
+
+.owned-property-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 24px;
+    padding: 3px 7px;
+    border: 1px solid #dce5e1;
+    border-radius: 6px;
+    background: #f8faf9;
+    color: #34443f;
+    font-size: 0.74rem;
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+.set-chip.complete {
+    border-color: rgba(39, 174, 96, 0.3);
+    background: rgba(39, 174, 96, 0.12);
+    color: #1f6b43;
+}
+
+.set-chip.partial {
+    border-color: #d8e2e7;
+    background: #f7f9fb;
+    color: #4a5a65;
+}
+
+.development-icons {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 14px;
+}
+
+.house-pip,
+.empty-house-pip,
+.hotel-pip {
+    display: inline-block;
+    flex: 0 0 auto;
+}
+
+.house-pip {
+    width: 6px;
+    height: 8px;
+    border-radius: 1px;
+    background: #2D6A4F;
+    box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+}
+
+.hotel-pip {
+    width: 15px;
+    height: 9px;
+    border-radius: 2px;
+    background: #c0392b;
+    box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+}
+
+.empty-house-pip {
+    width: 8px;
+    height: 8px;
+    border: 1px solid #9aa9a4;
+    border-radius: 2px;
+    background: #fff;
+}
+
+.building-na {
+    position: relative;
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border: 1px solid #9aa9a4;
+    border-radius: 50%;
+    background: #fff;
+    flex: 0 0 auto;
+}
+
+.building-na::after {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 5px;
+    width: 7px;
+    height: 1px;
+    background: #7a8984;
+    transform: rotate(-35deg);
+}
+
 .empty-state {
     color: #687782;
     margin: 6px 0;

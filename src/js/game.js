@@ -412,9 +412,194 @@ function deckDisplayName(deckType) {
     return 'Card';
 }
 
+const PROPERTY_GROUP_SIZES = {
+    'Brown': 2,
+    'Light Blue': 3,
+    'Pink': 3,
+    'Orange': 3,
+    'Red': 3,
+    'Yellow': 3,
+    'Green': 3,
+    'Dark Blue': 2,
+    'Railroad': 4,
+    'Utility': 2,
+};
+
+function getOwnedPropertyDetails(player) {
+    const allProperties = currentGame?.game_state?.properties || [];
+    const playerProperties = Array.isArray(player.properties) ? player.properties : [];
+    const ownedFromState = allProperties.filter(prop => prop.ownerId === player.userId);
+
+    const properties = ownedFromState.length || !playerProperties.length
+        ? ownedFromState
+        : playerProperties.map(prop => {
+            const fullProperty = allProperties.find(item => item.id === prop.id) || {};
+            return { ...fullProperty, ...prop, ownerId: player.userId, ownerName: player.name };
+        });
+
+    return properties
+        .map(prop => ({
+            ...prop,
+            houses: Number(prop.houses || 0),
+            price: Number(prop.price ?? prop.value ?? 0),
+        }))
+        .sort((a, b) => getPropertyBoardPosition(a.id) - getPropertyBoardPosition(b.id));
+}
+
+function getPropertyBoardPosition(propertyId) {
+    const square = (typeof BOARD_SQUARES !== 'undefined' ? BOARD_SQUARES : [])
+        .find(item => item.propertyId === propertyId);
+    return square ? square.position : 999;
+}
+
+function propertyAssetValue(property) {
+    if (property.value != null && Number.isFinite(Number(property.value))) {
+        return Number(property.value);
+    }
+    return Number(property.price || 0) + Number(property.houses || 0) * (HOUSE_COSTS[property.color] || 0);
+}
+
+function getPropertyColorValue(color) {
+    if (typeof PROP_COLORS !== 'undefined' && PROP_COLORS[color]) return PROP_COLORS[color];
+    if (color && !color.includes(' ')) return color;
+    return '#64748b';
+}
+
+function getReadableTextColor(colorValue) {
+    const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(colorValue || '');
+    if (!match) return '#ffffff';
+    const r = parseInt(match[1], 16);
+    const g = parseInt(match[2], 16);
+    const b = parseInt(match[3], 16);
+    return ((r * 299 + g * 587 + b * 114) / 1000) > 150 ? '#1f2933' : '#ffffff';
+}
+
+function getPropertyKind(property) {
+    if (property.color === 'Railroad') return 'Railroad';
+    if (property.color === 'Utility') return 'Utility';
+    return 'Street';
+}
+
+function getPropertyTypeLabel(property) {
+    const kind = getPropertyKind(property);
+    if (kind !== 'Street') return kind;
+    return `${property.color || 'Property'} street`;
+}
+
+function getPropertyIconHtml(property) {
+    const kind = getPropertyKind(property).toLowerCase();
+    const icon = kind === 'railroad' ? 'RR' : (kind === 'utility' ? '&#9889;' : '');
+    return `<span class="owned-property-icon type-${kind}" aria-hidden="true">${icon}</span>`;
+}
+
+function getPropertyGroupStatus(property, allProperties, ownedProperties, ownerId) {
+    const color = property.color || 'Property';
+    const fullGroup = allProperties.filter(prop => prop.color === color);
+    const total = fullGroup.length || PROPERTY_GROUP_SIZES[color] || 1;
+    const owned = fullGroup.length
+        ? fullGroup.filter(prop => prop.ownerId === ownerId).length
+        : ownedProperties.filter(prop => prop.color === color).length;
+    const complete = total > 0 && owned === total;
+    const kind = getPropertyKind(property);
+    const label = complete
+        ? (kind === 'Street' ? 'Monopoly' : 'Complete set')
+        : `${owned}/${total} set`;
+    return { owned, total, complete, label };
+}
+
+function getPropertyDevelopmentLabel(property) {
+    const houses = Number(property.houses || 0);
+    if (getPropertyKind(property) !== 'Street') return 'No buildings';
+    if (houses === 5) return 'Hotel';
+    if (houses > 0) return `${houses} house${houses === 1 ? '' : 's'}`;
+    return 'No houses';
+}
+
+function renderDevelopmentIcons(property) {
+    const houses = Number(property.houses || 0);
+    if (getPropertyKind(property) !== 'Street') {
+        return '<span class="building-na" aria-hidden="true"></span>';
+    }
+    if (houses === 5) {
+        return '<span class="hotel-pip" aria-hidden="true"></span>';
+    }
+    if (houses > 0) {
+        return Array.from({ length: houses }, () => '<span class="house-pip" aria-hidden="true"></span>').join('');
+    }
+    return '<span class="empty-house-pip" aria-hidden="true"></span>';
+}
+
+function getPropertyRentLabel(property, allProperties, ownedProperties, ownerId) {
+    const groupStatus = getPropertyGroupStatus(property, allProperties, ownedProperties, ownerId);
+    const rent = Array.isArray(property.rent) ? property.rent : [];
+    if (property.color === 'Utility') {
+        return `Rent ${groupStatus.complete ? '10x' : '4x'} dice`;
+    }
+    if (property.color === 'Railroad') {
+        return `Rent $${Number(rent[Math.max(0, groupStatus.owned - 1)] || rent[0] || 0)}`;
+    }
+
+    const houses = Number(property.houses || 0);
+    const baseRent = Number(rent[0] || 0);
+    const currentRent = houses > 0
+        ? Number(rent[houses] || baseRent)
+        : (groupStatus.complete ? baseRent * 2 : baseRent);
+    return `Rent $${currentRent}`;
+}
+
+function renderOwnedProperties(player, ownedProperties) {
+    if (!ownedProperties.length) return '';
+    const allProperties = currentGame?.game_state?.properties || [];
+    const totalValue = ownedProperties.reduce((sum, prop) => sum + propertyAssetValue(prop), 0);
+
+    return `
+        <div class="player-properties">
+            <div class="player-section-heading">
+                <h4>Properties</h4>
+                <span>${ownedProperties.length} owned &middot; $${totalValue.toFixed(0)} value</span>
+            </div>
+            <div class="owned-property-list">
+                ${ownedProperties.map(property => {
+                    const color = getPropertyColorValue(property.color);
+                    const ink = getReadableTextColor(color);
+                    const groupStatus = getPropertyGroupStatus(property, allProperties, ownedProperties, player.userId);
+                    const typeLabel = getPropertyTypeLabel(property);
+                    const developmentLabel = getPropertyDevelopmentLabel(property);
+                    const rentLabel = getPropertyRentLabel(property, allProperties, ownedProperties, player.userId);
+                    const groupClass = groupStatus.complete ? 'complete' : 'partial';
+
+                    return `
+                        <div class="owned-property-row" style="--property-color:${color};--property-ink:${ink};">
+                            ${getPropertyIconHtml(property)}
+                            <div class="owned-property-copy">
+                                <div class="owned-property-title">
+                                    <strong>${escapeHtml(property.name)}</strong>
+                                </div>
+                                <div class="owned-property-meta">
+                                    <span>${escapeHtml(typeLabel)}</span>
+                                    <span>Value $${propertyAssetValue(property).toFixed(0)}</span>
+                                </div>
+                                <div class="owned-property-chips">
+                                    <span class="owned-property-chip set-chip ${groupClass}">${escapeHtml(groupStatus.label)}</span>
+                                    <span class="owned-property-chip development-chip">
+                                        <span class="development-icons">${renderDevelopmentIcons(property)}</span>
+                                        ${escapeHtml(developmentLabel)}
+                                    </span>
+                                    <span class="owned-property-chip rent-chip">${escapeHtml(rentLabel)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    `;
+}
+
 // Render individual player card
 function renderPlayerCard(player, isCurrentUser) {
-    const totalPropertyValue = player.properties.reduce((sum, p) => sum + p.value, 0);
+    const ownedProperties = getOwnedPropertyDetails(player);
+    const totalPropertyValue = ownedProperties.reduce((sum, p) => sum + propertyAssetValue(p), 0);
     const corporationValue = getPlayerCorporationValue(player);
     const debtTotal = getDebtTotal(player.debts);
     const netWorth = player.cash + totalPropertyValue + corporationValue - debtTotal;
@@ -430,7 +615,7 @@ function renderPlayerCard(player, isCurrentUser) {
             </div>
             <div class="stat">
                 <span class="stat-label">Properties:</span>
-                <span class="stat-value">${player.properties.length}</span>
+                <span class="stat-value">${ownedProperties.length}</span>
             </div>
             <div class="stat">
                 <span class="stat-label">Net Worth:</span>
@@ -442,17 +627,8 @@ function renderPlayerCard(player, isCurrentUser) {
             <div><span>Received this turn</span><strong>$${cashFlow.received.toFixed(2)}</strong></div>
             <div><span>Received between turns</span><strong>$${cashFlow.receivedBetweenTurns.toFixed(2)}</strong></div>
         </div>
-        ${player.properties.length > 0 ? `
-            <div class="player-properties">
-                <h4>Properties:</h4>
-                <div class="property-badges">
-                    ${player.properties.map(p => `
-                        <span class="property-badge" style="background-color: ${p.color}">
-                            ${p.name}
-                        </span>
-                    `).join('')}
-                </div>
-            </div>
+        ${ownedProperties.length > 0 ? `
+            ${renderOwnedProperties(player, ownedProperties)}
         ` : ''}
         ${player.corporations.length > 0 ? `
             <div class="player-corporations">
