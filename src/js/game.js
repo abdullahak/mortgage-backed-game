@@ -790,6 +790,22 @@ function togglePlayerCard(summaryEl) {
     summaryEl.closest('.player-card').classList.toggle('collapsed', isOpen);
 }
 
+function renderImprovePropertiesButton(gameState, player, auctionOpen) {
+    const completeGroupProperties = getCompleteGroupProperties(player.userId, gameState);
+    if (!completeGroupProperties.length) return '';
+
+    const hasAvailableImprovement = completeGroupProperties.some(prop => Number(prop.houses || 0) < 5);
+    if (!hasAvailableImprovement) {
+        return '<button class="btn btn-secondary btn-sm" disabled title="All complete color groups already have hotels">Hotels Built</button>';
+    }
+
+    if (auctionOpen) {
+        return '<button class="btn btn-secondary btn-sm" disabled title="Resolve auction before buying houses or hotels">Buy Houses / Hotels</button>';
+    }
+
+    return '<button class="btn btn-success btn-sm" data-game-action="open-house">Buy Houses / Hotels</button>';
+}
+
 // Render action buttons for current player's turn
 function renderActionButtons() {
     const gameState = currentGame.game_state;
@@ -808,12 +824,14 @@ function renderActionButtons() {
     const buyButton = landing.canBuy
         ? '<button class="btn btn-success btn-sm action-btn-buy" data-game-action="open-buy-property">Buy Property</button>'
         : `<button class="btn btn-secondary btn-sm action-btn-buy" disabled title="${escapeHtml(landing.detail)}">${escapeHtml(buyUnavailableLabel(landing))}</button>`;
+    const improveButton = renderImprovePropertiesButton(gameState, currentPlayer, auctionOpen);
     return `
         <div class="action-buttons">
             ${!hasRolled ? `<button class="btn btn-primary" style="margin-bottom:8px;width:100%;" data-game-action="roll-dice">${rollButtonLabel}</button>` : ''}
             <div class="action-btn-secondary-group">
                 ${jailChoiceButtons}
                 ${auctionOpen ? '<button class="btn btn-secondary btn-sm action-btn-buy" disabled>Auction Open</button>' : buyButton}
+                ${improveButton}
                 <button class="btn btn-secondary btn-sm" data-game-action="open-ipo" ${auctionOpen ? 'disabled' : ''}>Create IPO</button>
                 <button class="btn btn-secondary btn-sm" data-game-action="open-debt" ${auctionOpen ? 'disabled' : ''}>Manage Debt</button>
                 <button class="btn btn-secondary btn-sm" data-game-action="open-corporation">Corporations</button>
@@ -2548,6 +2566,10 @@ function openHouseModal() {
     if (!currentGame || !currentUser) return;
     const gameState = currentGame.game_state;
     const myProps = getCompleteGroupProperties(currentUser.id, gameState);
+    if (!myProps.length) {
+        showToast('Own a complete color group before buying houses or hotels.');
+        return;
+    }
 
     pendingHouseSelections = {};
     myProps.forEach(p => { pendingHouseSelections[p.id] = 0; });
@@ -2566,18 +2588,19 @@ function openHouseModal() {
             const currentHouses = prop.houses || 0;
             const newHouses = currentHouses + delta;
             const costPer = HOUSE_COSTS[prop.color] || 0;
-            const houseLabel = newHouses === 5 ? 'Hotel' : `${newHouses} house(s)`;
+            const developmentLabel = getPropertyDevelopmentLabel({ ...prop, houses: newHouses });
+            const isAtHotel = newHouses >= 5;
             return `
                 <div class="house-property-row">
                     <div>
                         <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${PROP_COLORS[prop.color]};margin-right:6px;vertical-align:middle;"></span>
                         <strong>${escapeHtml(prop.name)}</strong>
-                        <span style="color:#888;margin-left:6px;font-size:0.8rem;">($${costPer}/house)</span>
+                        <span style="color:#888;margin-left:6px;font-size:0.8rem;">($${costPer}/improvement)</span>
                     </div>
                     <div class="house-count-control">
-                        <button data-game-action="adjust-house" data-property-id="${escapeAttr(prop.id)}" data-delta="-1">−</button>
-                        <span style="min-width:60px;text-align:center;">${houseLabel}</span>
-                        <button data-game-action="adjust-house" data-property-id="${escapeAttr(prop.id)}" data-delta="1">+</button>
+                        <button data-game-action="adjust-house" data-property-id="${escapeAttr(prop.id)}" data-delta="-1" ${delta <= 0 ? 'disabled' : ''}>−</button>
+                        <span style="min-width:72px;text-align:center;">${escapeHtml(developmentLabel)}</span>
+                        <button data-game-action="adjust-house" data-property-id="${escapeAttr(prop.id)}" data-delta="1" ${isAtHotel ? 'disabled' : ''}>+</button>
                     </div>
                 </div>`;
         }).join('');
